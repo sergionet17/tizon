@@ -1,0 +1,36 @@
+// Archivo de nivel raíz (NO confundir con app/build.gradle)
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // 🔹 Plugin necesario para integrar Firebase (debe estar aquí)
+        classpath 'com.google.gms:google-services:4.4.2'
+
+        // 🔹 Plugin Kotlin (asegúrate de que coincide con tu versión de Gradle)
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.0"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// ⚙️ Configuración de la herramienta de compilación
+rootProject.buildDir = "../build"
+
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+    project.evaluationDependsOn(":app")
+}
+
+// ✅ Mantiene la estructura ordenada
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "11613710443",
+    "project_id": "carbon-db-2a755",
+    "storage_bucket": "carbon-db-2a755.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:11613710443:android:20b82424b79d1910b2692e",
+        "android_client_info": {
+          "package_name": "com.example.tizon_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "11613710443-ob117tnlsoci2fl4bpe5f3mupqb6tdgd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.tizon_app",
+            "certificate_hash": "a8f434e8a3d6f6fe395c9c79dd676fdd0c520d8c"
+          }
+        },
+        {
+          "client_id": "11613710443-7c47qha5gap2f42n4scc1ovk5f87rgv2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxg7diZvN6NZPCoHsoe9m4J6eEAkx1ZFo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "11613710443-7c47qha5gap2f42n4scc1ovk5f87rgv2.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "11613710443-l7914qfuur5fgglsbriqfop2jg3v2o8v.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.tizonApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

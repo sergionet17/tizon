@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application'
+    id 'kotlin-android'
+    id 'com.google.gms.google-services'    // 👈 requerido por Firebase
+    id 'dev.flutter.flutter-gradle-plugin' // 👈 plugin Flutter (ya viene por defecto)
+}
+
+android {
+    namespace "com.example.tizon_app"           // 👈 cambia si usaste otro package name en Firebase
+    compileSdk 36                          // ✅ usa la versión más reciente que tengas
+
+    defaultConfig {
+        applicationId "com.example.tizon_app"   // 👈 debe coincidir con el package del json
+        minSdkVersion flutter.minSdkVersion
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        // Configuración necesaria para Firebase Auth en Android
+        multiDexEnabled true
+    }
+
+    buildTypes {
+        release {
+            // Desactiva minify al inicio (para evitar errores de obfuscación)
+            minifyEnabled false
+            shrinkResources false
+            // Si luego usas release, asegúrate de incluir tus reglas ProGuard
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+flutter {
+    source '../..'
+}
+
+dependencies {
+    // 🔹 Firebase / Google Play Services base
+    implementation platform('com.google.firebase:firebase-bom:33.5.1')
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-auth'
+    implementation 'com.google.firebase:firebase-firestore'
+
+    // 🔹 Si usas Google Sign-In
+    implementation 'com.google.android.gms:play-services-auth:21.2.0'
+
+    // 🔹 Compatibilidad multidex (para proyectos grandes)
+    implementation 'androidx.multidex:multidex:2.0.1'
+}
