@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'screens/login_screen.dart';
 import 'screens/success_screen.dart';
+import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,11 +38,11 @@ class MyApp extends StatelessWidget {
               body: Center(child: CircularProgressIndicator(strokeWidth: 6)),
             );
           }
-          if (snapshot.hasData) {
-            return const SuccessScreen();
-          }
-          return const LoginScreen();
-        },
+    if (snapshot.hasData) {
+      return const HomeScreen();  // ← Cambia a HomeScreen
+    }
+    return const LoginScreen();
+  },
       ),
     );
   }
