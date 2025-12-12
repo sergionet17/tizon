@@ -1,72 +1,80 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:firebase_auth_platform_interface/firebase_auth_platform_interface.dart';
+import 'package:hive/hive.dart';
+import 'connectivity_service.dart';
+import 'sync_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: kIsWeb
-        ? '11613710443-7c47qha5gap2f42n4scc1ovk5f87rgv2.apps.googleusercontent.com'
-        : null,
-    scopes: ['email'],
-  );
-
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-  User? get currentUser => _auth.currentUser;
-
-  String _generateEmail(String cedula) {
-    return '$cedula@tizonapp.com';
-  }
-
-  Future<String?> signInWithCedula(String cedula, String password) async {
-    try {
-      final email = _generateEmail(cedula);
-      await _auth.setPersistence(Persistence.LOCAL);
-      return await signInEmail(email, password);
-    } catch (e) {
-      return 'Error al iniciar sesión: $e';
-    }
-  }
-
-  Future<String?> registerWithCedula(String cedula, String password) async {
-    final email = _generateEmail(cedula);
-    return registerEmail(email, password);
-  }
-
   Future<String?> signInEmail(String email, String password) async {
+    var box = await Hive.openBox('usuarios');
+
+    // ✅ LOGIN OFFLINE
+    if (!ConnectivityService().isOnline) {
+      final users = box.get('usuarios_local', defaultValue: []) as List;
+
+      final exists = users.any((u) =>
+          u['email'] == email.trim() &&
+          u['password'] == password.trim());
+
+      if (exists) {
+        print('[OFFLINE] Usuario válido en el dispositivo');
+        return null;
+      }
+
+      return 'NO_LOCAL_USER'; // ✅ Activa tu modal
+    }
+
+    // ✅ LOGIN ONLINE
     try {
       await _auth.signInWithEmailAndPassword(email: email, password: password);
       return null;
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'user-not-found') return 'Usuario no encontrado';
-      if (e.code == 'wrong-password') return 'Contraseña incorrecta';
-      return 'Error: ${e.message}';
-    } catch (e) {
-      return 'Error inesperado: $e';
+      // ✅ Mensajes más claros
+      if (e.code == 'user-not-found') {
+        return 'El usuario no existe en nuestros registros.';
+      }
+      if (e.code == 'wrong-password') {
+        return 'La contraseña es incorrecta.';
+      }
+      if (e.code == 'invalid-credential') {
+        return 'Credenciales inválidas. Verifica tu cédula y contraseña.';
+      }
+      return e.message;
     }
   }
 
   Future<String?> registerEmail(String email, String password) async {
+    var box = await Hive.openBox('usuarios');
+
+    // ✅ REGISTRO OFFLINE
+    if (!ConnectivityService().isOnline) {
+      final users = box.get('usuarios_local', defaultValue: []) as List;
+      users.add({'email': email.trim(), 'password': password.trim()});
+      await box.put('usuarios_local', users);
+      print('[OFFLINE] Usuario guardado offline: $email');
+      return null;
+    }
+
+    // ✅ REGISTRO ONLINE
     try {
       await _auth.createUserWithEmailAndPassword(email: email, password: password);
       return null;
     } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') return 'Este correo ya está registrado';
-      if (e.code == 'weak-password') return 'Contraseña muy débil';
-      return 'Error: ${e.message}';
-    } catch (e) {
-      return 'Error inesperado: $e';
+      if (e.code == 'email-already-in-use') {
+        return 'Este usuario ya está registrado.';
+      }
+      return e.message;
     }
   }
 
   Future<String?> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return 'Inicio de sesión cancelado';
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
@@ -75,24 +83,49 @@ class AuthService {
 
       await _auth.signInWithCredential(credential);
       return null;
-    } catch (e, st) {
-      print('Error en signInWithGoogle: $e');
-      print(st);
-      return 'Error con Google: $e';
+    } catch (e) {
+      return e.toString();
     }
   }
 
-  Future<void> checkAuthState() async {
-    await _auth.setPersistence(Persistence.LOCAL);
-    if (_auth.currentUser != null) {
-      print('Usuario autenticado: ${_auth.currentUser!.email}');
-    } else {
-      print('No hay usuario autenticado');
+  Future<void> syncOfflineUsers() async {
+    if (ConnectivityService().isOnline) {
+      var box = await Hive.openBox('usuarios');
+      final users = box.get('usuarios_local', defaultValue: []) as List;
+
+      if (users.isNotEmpty) {
+        SyncService().startSync();
+
+        for (var user in users) {
+          try {
+            await _auth.createUserWithEmailAndPassword(
+              email: user['email'],
+              password: user['password'],
+            );
+            print('[SYNC] Usuario creado: ${user['email']}');
+          } catch (_) {
+            try {
+              await _auth.signInWithEmailAndPassword(
+                email: user['email'],
+                password: user['password'],
+              );
+              print('[SYNC] Usuario logueado: ${user['email']}');
+            } catch (e) {
+              print('[SYNC] Falló: ${user['email']} → $e');
+            }
+          }
+        }
+
+        await box.delete('usuarios_local');
+        SyncService().endSync();
+      }
     }
   }
 
   Future<void> signOut() async {
     await _auth.signOut();
-    await _googleSignIn.signOut();
+    await GoogleSignIn().signOut();
   }
+
+  User? get currentUser => _auth.currentUser;
 }

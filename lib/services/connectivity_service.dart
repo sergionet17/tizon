@@ -23,12 +23,19 @@ class ConnectivityService {
     });
   }
 
-  void _updateConnectionStatus(List<ConnectivityResult> results) {
-    // Si al menos uno de los resultados es distinto de "none", estamos online
-    _isOnline = results.any((r) => r != ConnectivityResult.none);
-    _controller.add(_isOnline);
+void _updateConnectionStatus(List<ConnectivityResult> results) {
+  final wasOnline = _isOnline;
+  _isOnline = results.any((r) => r != ConnectivityResult.none);
+
+  // ✅ LOGS CLAROS
+  if (!wasOnline && _isOnline) {
+    print('✅ [CONNECTIVITY] Internet detectado. Se reanudan operaciones.');
+  } else if (wasOnline && !_isOnline) {
+    print('❌ [CONNECTIVITY] Conexión perdida. Modo offline activado.');
   }
 
+  _controller.add(_isOnline);
+}
   void dispose() {
     _controller.close();
   }
