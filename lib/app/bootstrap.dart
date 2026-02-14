@@ -1,25 +1,15 @@
-// lib/app/bootstrap.dart
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:tizon_app/services/auth_service.dart';
+import 'package:tizon_app/services/connectivity_service.dart';
+import 'package:tizon_app/services/sync_service.dart';
 
 import '../firebase_options.dart';
 import '../services/hive_init.dart';
-import '../services/connectivity_service.dart';
-import '../services/auth_service.dart';
-import '../services/sync_service.dart';
 import '../services/sync_status.dart';
+import 'di.dart';
 
 class AppBootstrap {
-  final SyncService syncService;
-  final ConnectivityService connectivityService;
-  final AuthService authService;
-
-  AppBootstrap({
-    required this.syncService,
-    required this.connectivityService,
-    required this.authService,
-  });
-
   Future<void> init() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -32,20 +22,23 @@ class AppBootstrap {
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    await connectivityService.initialize();
+    // 1 sola instancia global
+    final connectivity = getIt.get<ConnectivityService>();
+    final syncService = getIt.get<SyncService>();
+    final authService = getIt.get<AuthService>();
 
+    await connectivity.initialize();
     syncService.initialize();
-
     await authService.syncOfflineUsers();
 
-    if (connectivityService.isOnline) {
-      await runFullSync();
+    if (connectivity.isOnline) {
+      await _runFullSync(syncService);
     } else {
       SyncStatus.set(SyncState.offline, msg: 'Sin internet');
     }
   }
 
-  Future<void> runFullSync() async {
+  Future<void> _runFullSync(SyncService syncService) async {
     SyncStatus.set(SyncState.syncing, msg: 'Sincronizando…');
     try {
       await syncService.syncAll();

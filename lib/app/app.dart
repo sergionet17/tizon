@@ -1,6 +1,5 @@
-// lib/app/app.dart
 import 'package:flutter/material.dart';
-import '../screens/home_screen.dart'; // o tu pantalla root actual
+import 'auth_gate.dart';
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -10,7 +9,7 @@ class App extends StatelessWidget {
     return MaterialApp(
       title: 'Tizón',
       debugShowCheckedModeBanner: false,
-      home: const HomeScreen(), // deja lo mismo que hoy
+      home: const AuthGate(),
     );
   }
 }
