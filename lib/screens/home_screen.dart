@@ -7,6 +7,7 @@ import '../widgets/connectivity_indicator.dart';
 import 'dashboard_screen.dart';
 import 'registro_screen.dart';
 import 'fincas_screen.dart';
+import '../core/logger/app_logger.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});

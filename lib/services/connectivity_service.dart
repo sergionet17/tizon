@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'sync_status.dart';
 
 class ConnectivityService {
   static final ConnectivityService _instance = ConnectivityService._internal();
@@ -23,19 +24,29 @@ class ConnectivityService {
     });
   }
 
-void _updateConnectionStatus(List<ConnectivityResult> results) {
-  final wasOnline = _isOnline;
-  _isOnline = results.any((r) => r != ConnectivityResult.none);
+  void _updateConnectionStatus(List<ConnectivityResult> results) {
+    final wasOnline = _isOnline;
+    _isOnline = results.any((r) => r != ConnectivityResult.none);
 
-  // ✅ LOGS CLAROS
-  if (!wasOnline && _isOnline) {
-    print('✅ [CONNECTIVITY] Internet detectado. Se reanudan operaciones.');
-  } else if (wasOnline && !_isOnline) {
-    print('❌ [CONNECTIVITY] Conexión perdida. Modo offline activado.');
+    if (!wasOnline && _isOnline) {
+      print('✅ [CONNECTIVITY] Internet detectado. Se reanudan operaciones.');
+    } else if (wasOnline && !_isOnline) {
+      print('❌ [CONNECTIVITY] Conexión perdida. Modo offline activado.');
+    }
+
+    // ✅ sincroniza estado global para UI
+    if (!_isOnline) {
+      SyncStatus.set(SyncState.offline, msg: 'Sin internet');
+    } else {
+      // Solo vuelve a "idleOnline" si NO está sincronizando
+      if (SyncStatus.state.value != SyncState.syncing) {
+        SyncStatus.set(SyncState.idleOnline, msg: 'Internet OK');
+      }
+    }
+
+    _controller.add(_isOnline);
   }
 
-  _controller.add(_isOnline);
-}
   void dispose() {
     _controller.close();
   }

@@ -26,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleCedulaSignIn() async {
     if (!_formKey.currentState!.validate()) return;
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -38,12 +39,15 @@ class _LoginScreenState extends State<LoginScreen> {
         ? await _auth.registerEmail(email, password)
         : await _auth.signInEmail(email, password);
 
+    if (!mounted) return;
+
     if (err == 'NO_LOCAL_USER') {
       final confirm = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -86,33 +90,51 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
 
+      if (!mounted) return;
+
       if (confirm == true) {
+        // Guardar local
         var box = await Hive.openBox('usuarios');
+        if (!mounted) return;
+
         final users = box.get('usuarios_local', defaultValue: []) as List;
         users.add({'email': email, 'password': password});
         await box.put('usuarios_local', users);
+        if (!mounted) return;
 
+        // ✅ Antes de navegar, apaga loading (opcional)
+        setState(() => _loading = false);
+
+        // Navegar y salir (evita setState después)
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
+        return;
       }
 
+      // Si canceló, solo apaga loading
+      if (!mounted) return;
       setState(() => _loading = false);
       return;
     }
 
     if (err == null) {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
-      }
+      // ✅ Antes de navegar, apaga loading
+      if (!mounted) return;
+      setState(() => _loading = false);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+      return;
     } else {
+      if (!mounted) return;
       setState(() => _error = err);
     }
 
+    if (!mounted) return;
     setState(() => _loading = false);
   }
 
@@ -231,17 +253,12 @@ class _LoginScreenState extends State<LoginScreen> {
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 28),
-
             if (_error != null) _buildError(),
-
             _buildCedulaField(),
             const SizedBox(height: 20),
-
             _buildPasswordField(),
             const SizedBox(height: 20),
-
             if (_isRegistering) _buildConfirmPasswordField(),
-
             _buildSubmitButton(),
             _buildToggleButton(),
             _buildGoogleButton(),
@@ -423,8 +440,7 @@ class _LoginScreenState extends State<LoginScreen> {
         height: 52,
         child: OutlinedButton.icon(
           onPressed: _loading ? null : () => _auth.signInWithGoogle(),
-          icon: const Icon(Icons.g_mobiledata,
-              color: Colors.black87, size: 24),
+          icon: const Icon(Icons.g_mobiledata, color: Colors.black87, size: 24),
           label: const Text(
             'Continuar con Google',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),

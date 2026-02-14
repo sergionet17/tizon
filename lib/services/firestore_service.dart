@@ -1,147 +1,88 @@
+// lib/services/firestore_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../models/finca.dart'; // IMPORTAR del modelo correcto
+import '../models/encuesta.dart';
 
 class FirestoreService {
-  final _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // ===== MÉTODOS EXISTENTES (no tocar) =====
-  
-  Future<void> upsertCurrentUser() async {
-    final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return;
-    await _db.collection('users').doc(u.uid).set({
-      'uid': u.uid,
-      'email': u.email,
-      'displayName': u.displayName ?? '',
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
-  }
+  // Obtener fincas del usuario desde Firestore
+  Stream<List<Finca>> getUserFincas() {
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) {
+      return Stream.value([]);
+    }
 
-  Future<void> addFootprintSample({required String category, required double kg}) async {
-    final u = FirebaseAuth.instance.currentUser;
-    if (u == null) return;
-    await _db.collection('users').doc(u.uid).collection('footprints').add({
-      'category': category, // e.g. 'transport'
-      'kg': kg,
-      'ts': FieldValue.serverTimestamp(),
+    return _firestore
+        .collection('fincas')
+        .where('userId', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Finca(
+          firebaseId: doc.id,
+          nombre: data['nombre'] ?? '',
+          ubicacion: data['ubicacion'] ?? '',
+          cultivo: data['cultivo'],
+          area: data['area']?.toDouble(),
+          imageUrl: data['imageUrl'],
+          createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+          updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+        );
+      }).toList();
     });
   }
 
-  // ===== NUEVOS MÉTODOS PARA FINCAS =====
-
-  // Obtener el ID del usuario actual
-  String? get userId => FirebaseAuth.instance.currentUser?.uid;
-
-  // Obtener todas las fincas del usuario
-Stream<List<Finca>> getUserFincas() {
-  if (userId == null) return Stream.value([]);
-
-  return _db
-      .collection('fincas')
-      .where('userId', isEqualTo: userId)
-      .snapshots()
-      .map((snapshot) {
-        final fincas = snapshot.docs
-            .map((doc) => Finca.fromFirestore(doc))
-            .toList();
-        
-        fincas.sort((a, b) {
-          if (a.createdAt == null) return 1;
-          if (b.createdAt == null) return -1;
-          return b.createdAt!.compareTo(a.createdAt!);
-        });
-        
-        return fincas;
-      });
-}
-
-  // Crear una nueva finca
+  // Crear finca en Firestore (ya no se usa directamente, usa sync_service)
   Future<void> createFinca({
     required String nombre,
     required String ubicacion,
     String? cultivo,
     double? area,
+    String? imageUrl,
   }) async {
-    if (userId == null) throw Exception('Usuario no autenticado');
+    final userId = _auth.currentUser?.uid;
+    if (userId == null) {
+      throw Exception('Usuario no autenticado');
+    }
 
-    await _db.collection('fincas').add({
-      'userId': userId,
+    await _firestore.collection('fincas').add({
       'nombre': nombre,
       'ubicacion': ubicacion,
       'cultivo': cultivo,
       'area': area,
+      'imageUrl': imageUrl,
+      'userId': userId,
       'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
-  // Eliminar una finca
-  Future<void> deleteFinca(String fincaId) async {
-    await _db.collection('fincas').doc(fincaId).delete();
-  }
-
-  // Actualizar una finca
-  Future<void> updateFinca({
-    required String fincaId,
-    String? nombre,
-    String? ubicacion,
-    String? cultivo,
-    double? area,
-  }) async {
-    final data = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
-    };
-
-    if (nombre != null) data['nombre'] = nombre;
-    if (ubicacion != null) data['ubicacion'] = ubicacion;
-    if (cultivo != null) data['cultivo'] = cultivo;
-    if (area != null) data['area'] = area;
-
-    await _db.collection('fincas').doc(fincaId).update(data);
-  }
-}
-
-// ===== MODELO DE FINCA =====
-
-class Finca {
-  final String id;
-  final String userId;
-  final String nombre;
-  final String ubicacion;
-  final String? cultivo;
-  final double? area;
-  final DateTime? createdAt;
-
-  Finca({
-    required this.id,
-    required this.userId,
-    required this.nombre,
-    required this.ubicacion,
-    this.cultivo,
-    this.area,
-    this.createdAt,
-  });
-
-  factory Finca.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return Finca(
-      id: doc.id,
-      userId: data['userId'] ?? '',
-      nombre: data['nombre'] ?? '',
-      ubicacion: data['ubicacion'] ?? '',
-      cultivo: data['cultivo'],
-      area: data['area']?.toDouble(),
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'userId': userId,
-      'nombre': nombre,
-      'ubicacion': ubicacion,
-      'cultivo': cultivo,
-      'area': area,
-    };
+  // Obtener encuestas de una finca desde Firestore
+  Stream<List<Encuesta>> getEncuestasByFinca(String fincaFirebaseId) {
+    return _firestore
+        .collection('encuestas')
+        .where('fincaId', isEqualTo: fincaFirebaseId)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return Encuesta(
+          firebaseId: doc.id,
+          fincaId: 0, // ID local, no disponible aquí
+          fecha: (data['fecha'] as Timestamp?)?.toDate(),
+          loteNumero: data['loteNumero'],
+          numeroArboles: data['numeroArboles'],
+          arbolesEnfermos: data['arbolesEnfermos'],
+          severidad: data['severidad'],
+          observaciones: data['observaciones'],
+          createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+          updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
+        );
+      }).toList();
+    });
   }
 }

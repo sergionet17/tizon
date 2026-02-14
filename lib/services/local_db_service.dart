@@ -1,4 +1,3 @@
-// lib/services/local_db_service.dart
 import 'package:hive/hive.dart';
 import '../models/common.dart';
 import '../models/finca.dart';
@@ -10,47 +9,83 @@ class LocalDbService {
   factory LocalDbService() => _instance;
   LocalDbService._internal();
 
-  // Nombres de boxes
   static const _fincasBox = 'fincas';
   static const _encuestasBox = 'encuestas';
   static const _mediosBox = 'medios';
 
+  String? _uid;
+
+  /// Llama esto cuando el usuario inicia sesión
+  void setUser(String uid) {
+    _uid = uid;
+  }
+
+  String _boxName(String base) {
+    final uid = _uid;
+    if (uid == null || uid.isEmpty) return base; // fallback (no recomendado)
+    return '${base}_$uid';
+  }
+
   Future<Box<Finca>> _fincas() async =>
-      await Hive.openBox<Finca>(_fincasBox);
-
+      await Hive.openBox<Finca>(_boxName(_fincasBox));
   Future<Box<Encuesta>> _encuestas() async =>
-      await Hive.openBox<Encuesta>(_encuestasBox);
-
+      await Hive.openBox<Encuesta>(_boxName(_encuestasBox));
   Future<Box<Medio>> _medios() async =>
-      await Hive.openBox<Medio>(_mediosBox);
+      await Hive.openBox<Medio>(_boxName(_mediosBox));
+
+  /// Opcional pero recomendado al cerrar sesión
+  Future<void> closeUserBoxes() async {
+    await Hive.box<Finca>(_boxName(_fincasBox)).close().catchError((_) {});
+    await Hive.box<Encuesta>(_boxName(_encuestasBox))
+        .close()
+        .catchError((_) {});
+    await Hive.box<Medio>(_boxName(_mediosBox)).close().catchError((_) {});
+  }
 
   // ===== FINCAS =====
   Future<List<Finca>> getFincas() async {
-    final b = await _fincas();
-    final list = b.values.toList();
-    list.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
-    return list;
+    print("🎬 DB: Llamando a getFincas(). UID actual: $_uid");
+
+    try {
+      final boxName = _boxName(_fincasBox);
+      print("📦 DB: Abriendo caja: $boxName");
+
+      final b = await _fincas();
+      print("📖 DB: Caja abierta. Contiene ${b.length} elementos.");
+
+      final list = b.values.toList();
+
+      // Ordenar
+      list.sort((a, b) =>
+          (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+
+      print("✅ DB: Retornando lista de ${list.length} fincas.");
+      return list;
+    } catch (e) {
+      print("❌ DB ERROR en getFincas: $e");
+      return [];
+    }
   }
 
-  Future<Finca?> getFinca(Id id) async {
+  Future<Finca?> getFinca(int id) async {
     final b = await _fincas();
     return b.get(id);
   }
 
-  Future<Id> saveFinca(Finca finca) async {
+  Future<int> saveFinca(Finca finca) async {
     final b = await _fincas();
     if (finca.id != null) {
-      await b.put(finca.id, finca);
+      await b.put(finca.id!, finca);
       return finca.id!;
     } else {
       final newKey = await b.add(finca);
       finca.id = newKey;
-      await b.put(newKey, finca); // persistimos id dentro del objeto
+      await b.put(newKey, finca);
       return newKey;
     }
   }
 
-  Future<void> deleteFinca(Id id) async {
+  Future<void> deleteFinca(int id) async {
     final b = await _fincas();
     await b.delete(id);
   }
@@ -59,26 +94,28 @@ class LocalDbService {
   Future<List<Encuesta>> getEncuestas() async {
     final b = await _encuestas();
     final list = b.values.toList();
-    list.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+    list.sort((a, b) =>
+        (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
     return list;
   }
 
-  Future<List<Encuesta>> getEncuestasByFinca(String fincaId) async {
+  Future<List<Encuesta>> getEncuestasByFinca(int fincaId) async {
     final b = await _encuestas();
     final list = b.values.where((e) => e.fincaId == fincaId).toList();
-    list.sort((a, b) => (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
+    list.sort((a, b) =>
+        (b.createdAt ?? DateTime(0)).compareTo(a.createdAt ?? DateTime(0)));
     return list;
   }
 
-  Future<Encuesta?> getEncuesta(Id id) async {
+  Future<Encuesta?> getEncuesta(int id) async {
     final b = await _encuestas();
     return b.get(id);
   }
 
-  Future<Id> saveEncuesta(Encuesta encuesta) async {
+  Future<int> saveEncuesta(Encuesta encuesta) async {
     final b = await _encuestas();
     if (encuesta.id != null) {
-      await b.put(encuesta.id, encuesta);
+      await b.put(encuesta.id!, encuesta);
       return encuesta.id!;
     } else {
       final newKey = await b.add(encuesta);
@@ -89,15 +126,15 @@ class LocalDbService {
   }
 
   // ===== MEDIOS =====
-  Future<List<Medio>> getMediosByEncuesta(String encuestaId) async {
+  Future<List<Medio>> getMediosByEncuesta(int encuestaId) async {
     final b = await _medios();
     return b.values.where((m) => m.encuestaId == encuestaId).toList();
   }
 
-  Future<Id> saveMedio(Medio medio) async {
+  Future<int> saveMedio(Medio medio) async {
     final b = await _medios();
     if (medio.id != null) {
-      await b.put(medio.id, medio);
+      await b.put(medio.id!, medio);
       return medio.id!;
     } else {
       final newKey = await b.add(medio);
@@ -127,5 +164,15 @@ class LocalDbService {
     return b.values
         .where((m) => m.estadoSinc == EstadoSincronizacion.pendiente)
         .toList();
+  }
+
+  // En local_db_service.dart
+  Future<void> syncFromFirebase(List<Finca> fincasDesdeFirebase) async {
+    final b = await _fincas();
+    for (var finca in fincasDesdeFirebase) {
+      // Guardamos en la caja local lo que viene de la nube
+      // Usamos put() para evitar duplicados si ya manejas un ID consistente
+      await b.put(finca.id, finca);
+    }
   }
 }

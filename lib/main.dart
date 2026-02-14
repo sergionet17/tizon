@@ -1,8 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 
 import 'firebase_options.dart';
 
@@ -10,6 +11,8 @@ import 'firebase_options.dart';
 import 'services/connectivity_service.dart';
 import 'services/auth_service.dart';
 import 'services/sync_service.dart';
+import 'services/hive_init.dart';
+import 'services/sync_status.dart';
 
 // ✅ Pantallas
 import 'screens/login_screen.dart';
@@ -19,30 +22,80 @@ import 'screens/home_screen.dart';
 import 'widgets/connectivity_indicator.dart';
 import 'widgets/sync_indicator.dart';
 
+import 'services/local_db_service.dart';
+
+StreamSubscription<bool>? _connSub;
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Inicializar Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    print('✅ [MAIN] Firebase inicializado');
 
-  // ✅ Inicializar Hive (OBLIGATORIO en Android/iOS)
-  await Hive.initFlutter();
+    await HiveInit.initialize();
+    print('✅ [MAIN] Hive inicializado');
 
-  // ✅ Configurar Firestore offline
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
 
-  // ✅ Inicializar conectividad
-  await ConnectivityService().initialize();
+    await ConnectivityService().initialize();
+    print('✅ [MAIN] ConnectivityService inicializado');
 
-  // ✅ Sincronizar usuarios offline al iniciar
-  await AuthService().syncOfflineUsers();
+    final syncService = SyncService();
+    syncService.initialize();
+    print('✅ [MAIN] SyncService inicializado');
 
-  runApp(const MyApp());
+    // ✅ Sincronizar usuarios offline al iniciar
+    await AuthService().syncOfflineUsers();
+
+    // ✅ Intentar sincronizar datos al iniciar (solo si hay internet)
+    if (ConnectivityService().isOnline) {
+      await _runFullSync(syncService);
+    } else {
+      SyncStatus.set(SyncState.offline, msg: 'Sin internet');
+    }
+
+    // ✅ Listener global: cuando vuelva internet, sincroniza UNA vez por evento
+    _connSub?.cancel();
+    _connSub =
+        ConnectivityService().onConnectivityChanged.listen((isOnline) async {
+      if (isOnline) {
+        print("🌐 [MAIN] Internet detectado → sincronizando...");
+        await AuthService().syncOfflineUsers();
+        await _runFullSync(syncService);
+      } else {
+        SyncStatus.set(SyncState.offline, msg: 'Sin internet');
+      }
+    });
+
+    runApp(const MyApp());
+  } catch (e) {
+    print('❌ [MAIN] Error en inicialización: $e');
+    runApp(const ErrorApp());
+  }
+}
+
+Future<void> _runFullSync(SyncService syncService) async {
+  // ✅ UI state
+  SyncStatus.set(SyncState.syncing, msg: 'Subiendo cambios…');
+
+  try {
+    await syncService.syncAll();
+    // si sigue online, queda idleOnline
+    if (ConnectivityService().isOnline) {
+      SyncStatus.set(SyncState.idleOnline, msg: 'Todo al día');
+    } else {
+      SyncStatus.set(SyncState.offline, msg: 'Sin internet');
+    }
+  } catch (e) {
+    SyncStatus.set(SyncState.error, msg: '$e');
+    print('⚠️ [MAIN] Error en sincronización: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -63,12 +116,17 @@ class MyApp extends StatelessWidget {
           Widget child;
 
           if (snapshot.connectionState == ConnectionState.waiting) {
+            print("🟡 [AUTH] Estado: esperando conexión con Firebase");
             child = const Scaffold(
               body: Center(child: CircularProgressIndicator(strokeWidth: 6)),
             );
           } else if (snapshot.hasData) {
+            final user = snapshot.data!;
+            print("✅ [AUTH] Usuario autenticado: ${user.uid}");
+            LocalDbService().setUser(user.uid);
             child = const HomeScreen();
           } else {
+            print("🔴 [AUTH] No hay usuario → LoginScreen");
             child = const LoginScreen();
           }
 
@@ -77,31 +135,52 @@ class MyApp extends StatelessWidget {
             initialData: ConnectivityService().isOnline,
             builder: (context, connSnapshot) {
               final isOnline = connSnapshot.data ?? true;
+              print("🌐 [CONN] Estado conexión: $isOnline");
 
-              // ✅ LOG cuando vuelve internet
-              if (isOnline) {
-                print("🌐 [MAIN] Internet detectado → intentando sincronizar usuarios...");
-                AuthService().syncOfflineUsers();
-              }
-
-              return StreamBuilder<bool>(
-                stream: SyncService().onSyncChanged,
-                initialData: SyncService().isSyncing,
-                builder: (context, syncSnapshot) {
-                  final isSyncing = syncSnapshot.data ?? false;
-
-                  return Stack(
-                    children: [
-                      child,
-                      ConnectivityIndicator(isOnline: isOnline),
-                      SyncIndicator(isSyncing: isSyncing),
-                    ],
-                  );
-                },
+              return Stack(
+                children: [
+                  child,
+                  ConnectivityIndicator(isOnline: isOnline),
+                  const SyncIndicator(),
+                ],
               );
             },
           );
         },
+      ),
+    );
+  }
+}
+
+class ErrorApp extends StatelessWidget {
+  const ErrorApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text(
+                'Error al inicializar la aplicación',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text('Por favor, reinicia la aplicación'),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  main();
+                },
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

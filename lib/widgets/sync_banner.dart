@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../services/sync_status.dart';
 
-class SyncIndicator extends StatelessWidget {
-  const SyncIndicator({super.key});
+class SyncBanner extends StatelessWidget {
+  final EdgeInsets margin;
+  const SyncBanner({super.key, this.margin = const EdgeInsets.all(12)});
 
   @override
   Widget build(BuildContext context) {
@@ -17,63 +18,55 @@ class SyncIndicator extends StatelessWidget {
 
         switch (state) {
           case SyncState.offline:
-            text = 'Sin internet';
-            icon = Icons.cloud_off;
+            text = 'Sin internet • No sincronizando';
+            icon = Icons.wifi_off;
             bg = Colors.orange.shade700;
             break;
-
           case SyncState.idleOnline:
-            text = 'Online • En espera';
-            icon = Icons.cloud_done;
+            text = 'Internet OK • Sincronización en espera';
+            icon = Icons.wifi;
             bg = Colors.blueGrey.shade700;
             break;
-
           case SyncState.syncing:
             text = 'Sincronizando…';
             icon = Icons.sync;
             bg = Colors.green.shade700;
             break;
-
           case SyncState.error:
-            text = 'Error sync';
+            text = 'Error de sincronización';
             icon = Icons.error_outline;
             bg = Colors.red.shade700;
             break;
         }
 
         final extra = (msg != null && msg.isNotEmpty) ? ' • $msg' : '';
+        final finalText = '$text$extra';
 
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          margin: margin,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                blurRadius: 8,
-                spreadRadius: 1,
-                offset: Offset(0, 2),
-              ),
-            ],
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                '$text$extra',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+              Icon(icon, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  finalText,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               if (state == SyncState.syncing) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 const SizedBox(
-                  width: 14,
-                  height: 14,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
                     color: Colors.white,

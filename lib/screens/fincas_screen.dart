@@ -1,457 +1,304 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import '../services/firestore_service.dart';
-import '../widgets/tizon_logo.dart';
-import 'registro_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-class FincasScreen extends StatelessWidget {
+// ✅ IMPORTANTE: Eliminamos el import de google_maps_flutter para evitar conflictos
+// Importamos directamente tus modelos
+import '../models/finca.dart';
+import '../models/common.dart'; // Aquí es donde viven LatLng y EstadoSincronizacion
+
+import '../services/local_db_service.dart';
+import '../widgets/tizon_logo.dart';
+import '../widgets/sync_indicator.dart';
+import 'registro_screen.dart';
+import 'add_finca_screen.dart';
+import '../core/logger/app_logger.dart';
+
+class FincasScreen extends StatefulWidget {
   const FincasScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final firestoreService = FirestoreService();
+  State<FincasScreen> createState() => _FincasScreenState();
+}
 
+class _FincasScreenState extends State<FincasScreen> {
+  final LocalDbService _dbService = LocalDbService();
+  List<Finca> _fincas = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    logScreen(screenName: 'FincasScreen', fileName: 'fincas_screen.dart');
+    _loadFincas();
+  }
+
+  Future<void> _loadFincas() async {
+    if (_fincas.isEmpty) setState(() => _isLoading = true);
+
+    try {
+      // 1. Carga Local (Hive)
+      final fincasLocales = await _dbService.getFincas();
+      setState(() {
+        _fincas = fincasLocales;
+        if (fincasLocales.isNotEmpty) _isLoading = false;
+      });
+
+      // 2. Sincronización con Firebase
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final snapshot = await FirebaseFirestore.instance
+            .collection('fincas')
+            .where('userId', isEqualTo: user.uid)
+            .get();
+
+// ... dentro de _loadFincas, en la parte de Firebase:
+
+        if (snapshot.docs.isNotEmpty) {
+          // 1. Obtenemos las fincas que ya tenemos en local para comparar
+          final fincasLocalesActuales = await _dbService.getFincas();
+
+          for (var doc in snapshot.docs) {
+            final data = doc.data();
+            final remoteId = doc.id;
+
+            // 2. BUSCAMOS SI YA EXISTE:
+            // Comprobamos si alguna finca local tiene el mismo firebaseId
+            bool yaExiste =
+                fincasLocalesActuales.any((f) => f.firebaseId == remoteId);
+
+            if (!yaExiste) {
+              final fincaRemota = Finca(
+                nombre: data['nombre'] ?? 'Sin nombre',
+                ubicacion: LatLng(
+                  latitude: (data['latitud'] ?? 0.0).toDouble(),
+                  longitude: (data['longitud'] ?? 0.0).toDouble(),
+                ),
+                firebaseId: remoteId,
+                cultivo: data['cultivo'],
+                area: (data['area'] as num?)?.toDouble(),
+                estadoSinc: EstadoSincronizacion.sincronizada,
+                updatedAt: DateTime.now(),
+              );
+
+              // Solo guardamos si es realmente nueva
+              await _dbService.saveFinca(fincaRemota);
+              print("📌 Nueva finca sincronizada: ${fincaRemota.nombre}");
+            } else {
+              print(
+                  "⏩ Finca saltada (ya existe localmente): ${data['nombre']}");
+            }
+          }
+
+          // 3. RE-CARGAMOS DESDE HIVE (ya sin duplicados)
+          final fincasActualizadas = await _dbService.getFincas();
+          if (mounted) {
+            setState(() => _fincas = fincasActualizadas);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Error en _loadFincas: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- El resto de los métodos se mantienen igual ---
+
+  Future<void> _navigateToAddFinca() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddFincaScreen()),
+    );
+    if (result == true) _loadFincas();
+  }
+
+  Future<void> _deleteFinca(Finca finca) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar finca'),
+        content:
+            Text('¿Estás seguro de que deseas eliminar "${finca.nombre}"?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _dbService.deleteFinca(finca.id!);
+      _loadFincas();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFE8F5E9),
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text(
-                    'Tizón SAS',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
+                  const Text('Tizón SAS',
+                      style:
+                          TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                   const SizedBox(width: 10),
                   TizonLogo(
-                    size: 40,
-                    showText: false,
-                    color: Colors.grey.shade700,
-                  ),
+                      size: 40, showText: false, color: Colors.grey.shade700),
                 ],
               ),
             ),
-
-            // Título
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'Seleccionar Finca',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Mis Fincas',
+                      style:
+                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  if (_fincas.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFF66BB6A),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: Text('${_fincas.length}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
-
-            // Lista de fincas
+            const SyncIndicator(),
             Expanded(
-              child: StreamBuilder<List<Finca>>(
-                stream: firestoreService.getUserFincas(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
-                  }
-
-                  if (snapshot.hasError) {
-                    return Center(
-                      child: Text('Error: ${snapshot.error}'),
-                    );
-                  }
-
-                  final fincas = snapshot.data ?? [];
-
-                  return SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      children: [
-                        // Lista de fincas existentes
-                        ...fincas.map((finca) => _FincaCard(
-                              finca: finca,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => RegistroScreen(
-                                      finca: finca,
-                                    ),
-                                  ),
-                                );
-                              },
-                            )),
-
-                        const SizedBox(height: 20),
-
-                        // Mensaje de alerta si no hay fincas
-                        if (fincas.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.warning_amber_rounded,
-                                  size: 60,
-                                  color: Colors.orange.shade400,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  '¡Aún no tienes fincas!',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Para continuar con tu registro,\ndebes añadir una finca.',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                        const SizedBox(height: 20),
-
-                        // Botón Registrar Nueva Finca
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              _showAddFincaDialog(context, firestoreService);
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF66BB6A),
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(27),
-                              ),
-                            ),
-                            icon: const Icon(Icons.add, size: 24),
-                            label: const Text(
-                              'Registrar Nueva Finca',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
+              child: _isLoading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(color: Color(0xFF66BB6A)))
+                  : RefreshIndicator(
+                      onRefresh: _loadFincas,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          children: [
+                            if (_fincas.isNotEmpty)
+                              ..._fincas.map((finca) => _FincaCard(
+                                    finca: finca,
+                                    onTap: () => Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                            builder: (_) =>
+                                                RegistroScreen(finca: finca))),
+                                    onDelete: () => _deleteFinca(finca),
+                                  )),
+                            if (_fincas.isEmpty) _buildEmptyState(),
+                            const SizedBox(height: 20),
+                            _buildAddButton(),
+                            const SizedBox(height: 40),
+                          ],
                         ),
-                        const SizedBox(height: 40),
-                      ],
+                      ),
                     ),
-                  );
-                },
-              ),
             ),
           ],
         ),
       ),
-
-      // Bottom Navigation
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _NavItem(
-                  icon: Icons.home_outlined,
-                  label: 'Inicio',
-                  onTap: () => Navigator.pop(context),
-                ),
-                _NavItem(
-                  icon: Icons.assignment_outlined,
-                  label: 'Registro',
-                  isActive: true,
-                ),
-                _NavItem(
-                  icon: Icons.person_outline,
-                  label: 'Perfil',
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
-  void _showAddFincaDialog(
-      BuildContext context, FirestoreService service) {
-    final nombreController = TextEditingController();
-    final ubicacionController = TextEditingController();
-    final cultivoController = TextEditingController();
-    final areaController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Nueva Finca'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nombreController,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre de la finca *',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ubicacionController,
-                decoration: const InputDecoration(
-                  labelText: 'Ubicación *',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: cultivoController,
-                decoration: const InputDecoration(
-                  labelText: 'Cultivo (opcional)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: areaController,
-                decoration: const InputDecoration(
-                  labelText: 'Área en hectáreas (opcional)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (nombreController.text.isEmpty ||
-                  ubicacionController.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Nombre y ubicación son obligatorios'),
-                  ),
-                );
-                return;
-              }
-
-              try {
-                await service.createFinca(
-                  nombre: nombreController.text,
-                  ubicacion: ubicacionController.text,
-                  cultivo: cultivoController.text.isEmpty
-                      ? null
-                      : cultivoController.text,
-                  area: areaController.text.isEmpty
-                      ? null
-                      : double.tryParse(areaController.text),
-                );
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Finca registrada exitosamente'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e')),
-                  );
-                }
-              }
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF66BB6A),
-            ),
-            child: const Text('Guardar'),
-          ),
+  Widget _buildEmptyState() {
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      child: Column(
+        children: [
+          Icon(Icons.agriculture_outlined,
+              size: 80, color: Colors.grey.shade300),
+          const SizedBox(height: 16),
+          const Text('¡Aún no tienes fincas!',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
+
+  Widget _buildAddButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 54,
+      child: ElevatedButton.icon(
+        onPressed: _navigateToAddFinca,
+        style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF66BB6A),
+            foregroundColor: Colors.white),
+        icon: const Icon(Icons.add),
+        label: const Text('Registrar Nueva Finca'),
+      ),
+    );
+  }
+
+  Widget _buildBottomNav() {
+    return BottomNavigationBar(
+      selectedItemColor: const Color(0xFF66BB6A),
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Inicio'),
+        BottomNavigationBarItem(
+            icon: Icon(Icons.assignment), label: 'Registro'),
+        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Perfil'),
+      ],
+    );
+  }
 }
+
+// --- Cards auxiliares ---
 
 class _FincaCard extends StatelessWidget {
   final Finca finca;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
 
-  const _FincaCard({
-    required this.finca,
-    required this.onTap,
-  });
-
-  IconData _getIcon() {
-    if (finca.cultivo?.toLowerCase().contains('café') ?? false) {
-      return Icons.local_cafe_outlined;
-    }
-    return Icons.home_outlined;
-  }
+  const _FincaCard(
+      {required this.finca, required this.onTap, required this.onDelete});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    _getIcon(),
-                    size: 28,
-                    color: Colors.green.shade700,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        finca.nombre,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        finca.cultivo != null
-                            ? 'Cultivo: ${finca.cultivo}'
-                            : 'Ubicación: ${finca.ubicacion}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                      if (finca.area != null)
-                        Text(
-                          'Área: ${finca.area} hectáreas',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        onTap: onTap,
+        leading: CircleAvatar(
+          backgroundColor: Colors.green.shade50,
+          child: Icon(Icons.agriculture, color: Colors.green.shade700),
         ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    this.isActive = false,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            color: isActive ? const Color(0xFF66BB6A) : Colors.grey.shade400,
-            size: 26,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: isActive ? const Color(0xFF66BB6A) : Colors.grey.shade400,
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-        ],
+        title: Text(finca.nombre,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text(finca.cultivo ?? 'Sin cultivo'),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          onPressed: onDelete,
+        ),
       ),
     );
   }
