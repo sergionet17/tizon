@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:tizon_app/services/local_db_service.dart';
+import 'package:tizon_app/services/local_image_service.dart';
 
-import '../services/local_db_service.dart';
-import '../services/local_image_service.dart';
-import '../models/finca.dart';
-import '../models/common.dart';
+import '../../../models/finca.dart';
+import '../../../models/common.dart';
 
 class AddFincaScreen extends StatefulWidget {
   const AddFincaScreen({super.key});
@@ -107,7 +107,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                     color: const Color(0xFF66BB6A).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.photo_library, color: Color(0xFF66BB6A)),
+                  child:
+                      const Icon(Icons.photo_library, color: Color(0xFF66BB6A)),
                 ),
                 title: const Text('Seleccionar de galería'),
                 onTap: () {
@@ -126,7 +127,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
     final cleaned = raw.replaceAll(';', ',').replaceAll(' ', ',');
     final parts = cleaned.split(',').where((p) => p.trim().isNotEmpty).toList();
     if (parts.length < 2) {
-      return const LatLng(latitude: 1.853, longitude: -76.050); // fallback Pitalito
+      return const LatLng(
+          latitude: 1.853, longitude: -76.050); // fallback Pitalito
     }
     final lat = double.tryParse(parts[0].trim()) ?? 1.853;
     final lng = double.tryParse(parts[1].trim()) ?? -76.050;
@@ -143,8 +145,12 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
       final nuevaFinca = Finca(
         nombre: _nombreController.text.trim(),
         ubicacion: _parseLatLng(_ubicacionController.text.trim()),
-        cultivo: _cultivoController.text.trim().isEmpty ? null : _cultivoController.text.trim(),
-        area: _areaController.text.trim().isEmpty ? null : double.tryParse(_areaController.text.trim()),
+        cultivo: _cultivoController.text.trim().isEmpty
+            ? null
+            : _cultivoController.text.trim(),
+        area: _areaController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_areaController.text.trim()),
         estadoSinc: EstadoSincronizacion.pendiente,
       );
 
@@ -166,7 +172,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
       } else if (_imageFile != null && kIsWeb) {
         // En web: por ahora solo mostramos preview. Guardar imagen en local filesystem NO aplica.
         // Recomendación: subir a Firebase Storage en tu SyncService y guardar urlRemota.
-        print('🌐 [AddFinca] Imagen seleccionada en Web: no se guarda como archivo local.');
+        print(
+            '🌐 [AddFinca] Imagen seleccionada en Web: no se guarda como archivo local.');
       }
 
       if (mounted) {
@@ -318,7 +325,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                 enabled: !_isLoading,
                 decoration: InputDecoration(
                   labelText: 'Nombre de la finca *',
-                  prefixIcon: const Icon(Icons.agriculture, color: Color(0xFF66BB6A)),
+                  prefixIcon:
+                      const Icon(Icons.agriculture, color: Color(0xFF66BB6A)),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -331,7 +339,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
                   ),
                   errorBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -354,7 +363,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                 enabled: !_isLoading,
                 decoration: InputDecoration(
                   labelText: 'Ubicación *',
-                  prefixIcon: const Icon(Icons.location_on, color: Color(0xFF66BB6A)),
+                  prefixIcon:
+                      const Icon(Icons.location_on, color: Color(0xFF66BB6A)),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -367,7 +377,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
                   ),
                   errorBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -391,7 +402,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                 decoration: InputDecoration(
                   labelText: 'Tipo de cultivo',
                   hintText: 'Ej: Café, Plátano, Cacao...',
-                  prefixIcon: const Icon(Icons.local_florist, color: Color(0xFF66BB6A)),
+                  prefixIcon:
+                      const Icon(Icons.local_florist, color: Color(0xFF66BB6A)),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -404,7 +416,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
                   ),
                 ),
               ),
@@ -415,11 +428,13 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
               TextFormField(
                 controller: _areaController,
                 enabled: !_isLoading,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 decoration: InputDecoration(
                   labelText: 'Área en hectáreas',
                   hintText: 'Ej: 5.5',
-                  prefixIcon: const Icon(Icons.square_foot, color: Color(0xFF66BB6A)),
+                  prefixIcon:
+                      const Icon(Icons.square_foot, color: Color(0xFF66BB6A)),
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -432,7 +447,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 2),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
                   ),
                   errorBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),

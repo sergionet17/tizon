@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../services/firestore_service.dart';
 import 'package:tizon_app/models/finca.dart';
 
 class RegistroScreen extends StatelessWidget {

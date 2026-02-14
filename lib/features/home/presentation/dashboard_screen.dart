@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 // ✅ Logger central (ajusta la ruta si es diferente)
-import '../core/logger/app_logger.dart';
+import 'package:tizon_app/core/logger/app_logger.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});

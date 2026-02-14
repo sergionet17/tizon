@@ -9,6 +9,6 @@ final getIt = GetIt.instance;
 void setupDI() {
   // Services (singletons)
   getIt.registerLazySingleton<ConnectivityService>(() => ConnectivityService());
-  getIt.registerLazySingleton<AuthService>(() => AuthService());
   getIt.registerLazySingleton<SyncService>(() => SyncService());
+  getIt.registerLazySingleton<AuthService>(() => AuthService());
 }

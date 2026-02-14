@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../services/auth_service.dart';
+import 'package:tizon_app/services/auth_service.dart';
 
 class SuccessScreen extends StatefulWidget {
   const SuccessScreen({super.key});
@@ -9,7 +9,8 @@ class SuccessScreen extends StatefulWidget {
   State<SuccessScreen> createState() => _SuccessScreenState();
 }
 
-class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProviderStateMixin {
+class _SuccessScreenState extends State<SuccessScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
@@ -33,7 +34,9 @@ class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final isGoogleUser = user?.providerData.any((info) => info.providerId == 'google.com') ?? false;
+    final isGoogleUser =
+        user?.providerData.any((info) => info.providerId == 'google.com') ??
+            false;
 
     return Scaffold(
       body: Container(
@@ -84,9 +87,10 @@ class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProvider
                     // Título
                     Text(
                       '¡BIENVENIDO!',
-                      style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                        color: Colors.green.shade700,
-                      ),
+                      style:
+                          Theme.of(context).textTheme.headlineLarge?.copyWith(
+                                color: Colors.green.shade700,
+                              ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
@@ -127,7 +131,8 @@ class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProvider
 
                           // Método de autenticación
                           _InfoRow(
-                            icon: isGoogleUser ? Icons.g_mobiledata : Icons.lock,
+                            icon:
+                                isGoogleUser ? Icons.g_mobiledata : Icons.lock,
                             label: 'Método',
                             value: isGoogleUser ? 'GOOGLE' : 'EMAIL/PASSWORD',
                             color: isGoogleUser ? Colors.red : Colors.orange,
@@ -146,16 +151,21 @@ class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProvider
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (context) => AlertDialog(
-                              title: const Text('Cerrar Sesión', style: TextStyle(fontSize: 24)),
-                              content: const Text('¿Estás seguro?', style: TextStyle(fontSize: 18)),
+                              title: const Text('Cerrar Sesión',
+                                  style: TextStyle(fontSize: 24)),
+                              content: const Text('¿Estás seguro?',
+                                  style: TextStyle(fontSize: 18)),
                               actions: [
                                 TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text('CANCELAR', style: TextStyle(fontSize: 16)),
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('CANCELAR',
+                                      style: TextStyle(fontSize: 16)),
                                 ),
                                 FilledButton(
                                   onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('SALIR', style: TextStyle(fontSize: 16)),
+                                  child: const Text('SALIR',
+                                      style: TextStyle(fontSize: 16)),
                                 ),
                               ],
                             ),
@@ -165,11 +175,14 @@ class _SuccessScreenState extends State<SuccessScreen> with SingleTickerProvider
                           }
                         },
                         icon: const Icon(Icons.logout, size: 24),
-                        label: const Text('CERRAR SESIÓN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        label: const Text('CERRAR SESIÓN',
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.red,
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
                         ),
                       ),
                     ),

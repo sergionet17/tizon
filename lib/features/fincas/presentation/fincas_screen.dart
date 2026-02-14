@@ -5,15 +5,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 // ✅ IMPORTANTE: Eliminamos el import de google_maps_flutter para evitar conflictos
 // Importamos directamente tus modelos
-import '../models/finca.dart';
-import '../models/common.dart'; // Aquí es donde viven LatLng y EstadoSincronizacion
+import '../../../models/finca.dart';
+import '../../../models/common.dart'; // Aquí es donde viven LatLng y EstadoSincronizacion
 
-import '../services/local_db_service.dart';
-import '../widgets/tizon_logo.dart';
-import '../widgets/sync_indicator.dart';
-import 'registro_screen.dart';
+import '../../../services/local_db_service.dart';
+import '../../../widgets/tizon_logo.dart';
+import '../../../widgets/sync_indicator.dart';
 import 'add_finca_screen.dart';
-import '../core/logger/app_logger.dart';
+import '../../../core/logger/app_logger.dart';
+import '../../auth/presentation/registro_screen.dart';
 
 class FincasScreen extends StatefulWidget {
   const FincasScreen({super.key});

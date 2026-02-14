@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
-import '../services/auth_service.dart';
-import '../services/connectivity_service.dart';
-import '../widgets/connectivity_indicator.dart';
-import 'home_screen.dart';
+import 'package:tizon_app/services/auth_service.dart';
+import 'package:tizon_app/services/connectivity_service.dart';
+import 'package:tizon_app/widgets/connectivity_indicator.dart';
+import 'package:tizon_app/features/home/presentation/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

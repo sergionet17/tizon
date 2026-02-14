@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../services/auth_service.dart';
-import '../services/connectivity_service.dart';
-import '../widgets/tizon_logo.dart';
-import '../widgets/connectivity_indicator.dart';
+import 'package:tizon_app/features/auth/presentation/registro_screen.dart';
+import 'package:tizon_app/features/fincas/presentation/fincas_screen.dart';
+import '../../../services/auth_service.dart';
+import '../../../services/connectivity_service.dart';
+import '../../../widgets/tizon_logo.dart';
+import '../../../widgets/connectivity_indicator.dart';
 import 'dashboard_screen.dart';
-import 'registro_screen.dart';
-import 'fincas_screen.dart';
-import '../core/logger/app_logger.dart';
+
+import 'package:tizon_app/core/logger/app_logger.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
