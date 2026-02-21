@@ -1,123 +1,205 @@
 // lib/services/sync_service.dart
+
+// Dart: utilidades de async (Stream, StreamController, StreamSubscription)
 import 'dart:async';
+
+// Dart: manejo de archivos locales e InternetAddress.lookup (ping real)
 import 'dart:io';
+
+// Plugin: detecta cambios de conectividad (wifi/mobile/none)
 import 'package:connectivity_plus/connectivity_plus.dart';
+
+// Firebase: base de datos (Firestore)
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Firebase: auth (para userId y sesión actual)
 import 'package:firebase_auth/firebase_auth.dart';
+
+// Firebase: almacenamiento (subir imágenes/audios)
 import 'package:firebase_storage/firebase_storage.dart';
-import '../models/finca.dart';
-import '../models/encuesta.dart';
-import '../models/medio.dart';
+
+// Modelos locales (Hive) que ya tienes en tu app
 import '../models/common.dart';
+import '../models/encuesta.dart';
+import '../models/finca.dart';
+import '../models/medio.dart';
+import 'package:tizon_app/core/sync/fincas_sync_handler.dart';
+import 'package:tizon_app/core/sync/encuestas_sync_handler.dart';
+import 'package:tizon_app/core/sync/medios_sync_handler.dart';
+
+// Servicios locales (Hive + manejo de imágenes locales)
 import 'local_db_service.dart';
 import 'local_image_service.dart';
 
+// ✅ DI: para usar UNA sola instancia global (evita duplicados)
+// Asegúrate de que esto exista (ya lo tienes): lib/app/di.dart
+import 'package:tizon_app/app/di.dart'
+    hide EncuestasSyncHandler, MediosSyncHandler;
+
+/// Tipos de sincronización (hoy no lo usas mucho, pero está bien tenerlo)
 enum SyncType { users, fincas, encuestas, medios, all }
 
+/// SyncService = orquestador de sincronización offline -> online.
+/// - Lee pendientes en Hive (LocalDbService)
+/// - Sube archivos a Storage (FirebaseStorage)
+/// - Crea/actualiza docs en Firestore
+/// - Marca el estado en Hive (sincronizada / error)
 class SyncService {
-  static final SyncService _instance = SyncService._internal();
-  factory SyncService() => _instance;
-  SyncService._internal();
+  SyncService();
 
-  final LocalDbService _localDb = LocalDbService();
-  final LocalImageService _imageService = LocalImageService();
+  // ✅ Dependencias (usando DI)
+  //
+  // Antes: final LocalDbService _localDb = LocalDbService();
+  // Eso creaba una instancia nueva y podía duplicar estado/listeners.
+  //
+  // Ahora: traemos las instancias únicas registradas en get_it.
+  final LocalDbService _localDb = getIt<LocalDbService>();
+  final LocalImageService _imageService = getIt<LocalImageService>();
+
+  // Firebase singletons (estos ya son singletons internos, está ok)
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+
+  // Plugin de conectividad (escucha wifi/mobile/none)
   final Connectivity _connectivity = Connectivity();
 
+  // Controlador para notificar a la UI si está sincronizando (true/false)
+  // broadcast => varios listeners pueden escuchar (banner, icono, etc.)
   final _controller = StreamController<bool>.broadcast();
+
+  // Suscripción al stream de conectividad (para poder cancelarla luego)
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+
+  // Flag interno: evita correr 2 sync al tiempo
   bool _isSyncing = false;
 
+  // Getter: permite a otros saber si está sincronizando
   bool get isSyncing => _isSyncing;
+
+  // Stream: permite a la UI escuchar cambios de estado (sync/no sync)
   Stream<bool> get onSyncChanged => _controller.stream;
 
-  /// Inicializa el listener de conectividad
+  /// Inicializa el listener de conectividad.
+  /// Idea: si vuelve internet, corre sync automático.
   void initialize() {
+    // (En producción cambia print por logger, pero por ahora ok)
+    // ignore: avoid_print
     print('🔌 [SYNC] Inicializando listener de conectividad...');
+
+    // Nos suscribimos a cambios (wifi/mobile/none)
     _connectivitySubscription = _connectivity.onConnectivityChanged.listen(
       (List<ConnectivityResult> results) async {
-        if (results.any((result) => 
-            result == ConnectivityResult.mobile || 
-            result == ConnectivityResult.wifi)) {
-          print('✅ [SYNC] Conexión detectada, iniciando sincronización automática...');
-          await syncAll();
+        // Si detecta wifi o datos, intenta sincronizar
+        final online = results.any(
+          (result) =>
+              result == ConnectivityResult.mobile ||
+              result == ConnectivityResult.wifi,
+        );
+
+        if (online) {
+          // ignore: avoid_print
+          print(
+              '✅ [SYNC] Conexión detectada, iniciando sincronización automática...');
+          await syncAll(); // corre sync completo
         } else {
+          // ignore: avoid_print
           print('❌ [SYNC] Sin conexión a internet');
         }
       },
     );
   }
 
-  /// Detiene el servicio
+  /// Detiene el servicio (muy importante para no filtrar memoria).
+  /// Si no lo cancelas, el listener puede quedar vivo aunque cambies pantallas.
   void dispose() {
     _connectivitySubscription?.cancel();
     _controller.close();
   }
 
-  /// Verifica si hay conexión a internet
+  /// Verifica si hay conexión REAL a internet.
+  /// - connectivity_plus solo te dice "tengo wifi", pero puede ser wifi sin internet.
+  /// - Por eso hacemos lookup a 'google.com' con timeout.
   Future<bool> hasConnection() async {
     try {
       final results = await _connectivity.checkConnectivity();
+
+      // Si no hay ninguna red, no hay internet.
       if (results.contains(ConnectivityResult.none)) {
         return false;
       }
-      
-      // Verificar conectividad real
-      final result = await InternetAddress.lookup('google.com')
+
+      // Verificar conectividad real con DNS lookup (con timeout).
+      final lookup = await InternetAddress.lookup('google.com')
           .timeout(const Duration(seconds: 5));
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } catch (e) {
+
+      // Si resolvió y hay dirección válida, asumimos internet.
+      return lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      // Si falla lookup o timeout -> asumimos sin internet
       return false;
     }
   }
 
   // ===== MÉTODOS PÚBLICOS PARA SINCRONIZACIÓN =====
 
-  /// Inicia sincronización manual de usuarios (compatibilidad con código existente)
+  /// startSync/endSync: hoy los estás usando desde AuthService para mostrar UI.
+  /// No hacen la sync real, solo cambian estado y notifican.
   void startSync() {
+    // ignore: avoid_print
     print('🔄 [SYNC] Iniciando sincronización de usuarios offline...');
     _isSyncing = true;
-    _controller.add(true);
+    _controller.add(true); // notifica a la UI
   }
 
-  /// Finaliza sincronización de usuarios
   void endSync() {
+    // ignore: avoid_print
     print('✅ [SYNC] Sincronización completada.');
     _isSyncing = false;
-    _controller.add(false);
+    _controller.add(false); // notifica a la UI
   }
 
-  /// Sincroniza todos los datos pendientes
+  /// Sincroniza todos los datos pendientes (Fincas -> Encuestas -> Medios).
+  /// Ese orden es clave porque hay dependencias:
+  /// - encuesta depende de finca
+  /// - medio depende de encuesta
   Future<void> syncAll() async {
     if (_isSyncing) {
+      // ignore: avoid_print
       print('⚠️ [SYNC] Ya hay una sincronización en curso');
       return;
     }
-    
+
     final hasConn = await hasConnection();
     if (!hasConn) {
+      // ignore: avoid_print
       print('❌ [SYNC] Sin conexión a internet');
       return;
     }
 
     _isSyncing = true;
     _controller.add(true);
-    print('🔄 [SYNC] Iniciando sincronización completa...');
+    // ignore: avoid_print
+    print('🔄 [SYNC] Iniciando sincronización completa (handlers)...');
 
     try {
-      // 1. Sincronizar fincas primero
-      await syncFincas();
-      
-      // 2. Luego encuestas (dependen de fincas)
-      await syncEncuestas();
-      
-      // 3. Finalmente medios (dependen de encuestas)
-      await syncMedios();
+      // ✅ Orden importante por dependencias
+      final handlers = [
+        getIt<FincasSyncHandler>(),
+        getIt<EncuestasSyncHandler>(),
+        getIt<MediosSyncHandler>(),
+      ];
 
+      for (final h in handlers) {
+        // ignore: avoid_print
+        print('➡️ [SYNC] Ejecutando handler: ${h.name}');
+        await h.sync();
+      }
+
+      // ignore: avoid_print
       print('✅ [SYNC] Sincronización completa exitosa');
     } catch (e) {
+      // ignore: avoid_print
       print('❌ [SYNC] Error en sincronización: $e');
     } finally {
       _isSyncing = false;
@@ -125,222 +207,12 @@ class SyncService {
     }
   }
 
-  /// Sincroniza solo las fincas
-  Future<void> syncFincas() async {
-    print('📊 [SYNC] Sincronizando fincas...');
-    final fincasPendientes = await _localDb.getFincasPendientesSinc();
-    print('   → ${fincasPendientes.length} fincas pendientes');
-    
-    for (final finca in fincasPendientes) {
-      try {
-        print('   🔄 Sincronizando finca: ${finca.nombre}');
-        
-        String? imageUrl;
-        
-        // Subir imagen si existe
-        if (finca.imagePath != null && await _imageService.imageExists(finca.imagePath!)) {
-          print('   📸 Subiendo imagen...');
-          imageUrl = await _uploadFile(
-            File(finca.imagePath!),
-            'fincas/${_auth.currentUser!.uid}/${finca.id}_${DateTime.now().millisecondsSinceEpoch}.jpg',
-          );
-        }
-
-        // Preparar datos
-        final fincaData = {
-          'nombre': finca.nombre,
-          'ubicacion': finca.ubicacion,
-          'cultivo': finca.cultivo,
-          'area': finca.area,
-          'imageUrl': imageUrl,
-          'userId': _auth.currentUser!.uid,
-          'createdAt': Timestamp.fromDate(finca.createdAt ?? DateTime.now()),
-          'updatedAt': Timestamp.fromDate(DateTime.now()),
-        };
-
-        DocumentReference docRef;
-        
-        // Actualizar o crear en Firestore
-        if (finca.firebaseId != null) {
-          docRef = _firestore.collection('fincas').doc(finca.firebaseId);
-          await docRef.update(fincaData);
-          print('   ✅ Finca actualizada en Firestore');
-        } else {
-          docRef = await _firestore.collection('fincas').add(fincaData);
-          print('   ✅ Finca creada en Firestore con ID: ${docRef.id}');
-        }
-
-        // Actualizar en Hive
-        final fincaActualizada = finca.copyWith(
-          firebaseId: docRef.id,
-          imageUrl: imageUrl,
-          estadoSinc: EstadoSincronizacion.sincronizada,
-          updatedAt: DateTime.now(),
-        );
-        
-        await _localDb.saveFinca(fincaActualizada);
-        print('   ✅ Finca actualizada en Hive');
-        
-      } catch (e) {
-        print('   ❌ Error sincronizando finca ${finca.nombre}: $e');
-        final fincaConError = finca.copyWith(
-          estadoSinc: EstadoSincronizacion.error,
-        );
-        await _localDb.saveFinca(fincaConError);
-      }
-    }
-  }
-
-  /// Sincroniza solo las encuestas
-  Future<void> syncEncuestas() async {
-    print('📋 [SYNC] Sincronizando encuestas...');
-    final encuestasPendientes = await _localDb.getEncuestasPendientesSinc();
-    print('   → ${encuestasPendientes.length} encuestas pendientes');
-    
-    for (final encuesta in encuestasPendientes) {
-      try {
-        print('   🔄 Sincronizando encuesta del lote ${encuesta.loteNumero}');
-        
-        // Verificar que la finca esté sincronizada usando el ID local
-        final finca = await _localDb.getFinca(encuesta.fincaId);
-        if (finca?.firebaseId == null) {
-          print('   ⚠️ Finca ${encuesta.fincaId} no sincronizada, omitiendo encuesta');
-          continue;
-        }
-
-        final encuestaData = {
-          'fincaId': finca!.firebaseId,
-          'fecha': Timestamp.fromDate(encuesta.fecha ?? DateTime.now()),
-          'loteNumero': encuesta.loteNumero,
-          'numeroArboles': encuesta.numeroArboles,
-          'arbolesEnfermos': encuesta.arbolesEnfermos,
-          'severidad': encuesta.severidad,
-          'localizacion': encuesta.localizacion != null ? {
-            'latitude': encuesta.localizacion!.latitude,
-            'longitude': encuesta.localizacion!.longitude,
-          } : null,
-          'observaciones': encuesta.observaciones,
-          'userId': _auth.currentUser!.uid,
-          'createdAt': Timestamp.fromDate(encuesta.createdAt ?? DateTime.now()),
-          'updatedAt': Timestamp.fromDate(DateTime.now()),
-        };
-
-        DocumentReference docRef;
-        
-        if (encuesta.firebaseId != null) {
-          docRef = _firestore.collection('encuestas').doc(encuesta.firebaseId);
-          await docRef.update(encuestaData);
-          print('   ✅ Encuesta actualizada en Firestore');
-        } else {
-          docRef = await _firestore.collection('encuestas').add(encuestaData);
-          print('   ✅ Encuesta creada en Firestore con ID: ${docRef.id}');
-        }
-
-        final encuestaActualizada = encuesta.copyWith(
-          firebaseId: docRef.id,
-          estadoSinc: EstadoSincronizacion.sincronizada,
-          updatedAt: DateTime.now(),
-        );
-        
-        await _localDb.saveEncuesta(encuestaActualizada);
-        print('   ✅ Encuesta actualizada en Hive');
-        
-      } catch (e) {
-        print('   ❌ Error sincronizando encuesta: $e');
-        final encuestaConError = encuesta.copyWith(
-          estadoSinc: EstadoSincronizacion.error,
-        );
-        await _localDb.saveEncuesta(encuestaConError);
-      }
-    }
-  }
-
-  /// Sincroniza solo los medios (fotos/audios)
-  Future<void> syncMedios() async {
-    print('📷 [SYNC] Sincronizando medios...');
-    final mediosPendientes = await _localDb.getMediosPendientesSinc();
-    print('   → ${mediosPendientes.length} medios pendientes');
-    
-    for (final medio in mediosPendientes) {
-      try {
-        print('   🔄 Sincronizando medio tipo: ${medio.tipo}');
-        
-        // Verificar que la encuesta esté sincronizada usando el ID local
-        final encuesta = await _localDb.getEncuesta(medio.encuestaId);
-        if (encuesta?.firebaseId == null) {
-          print('   ⚠️ Encuesta ${medio.encuestaId} no sincronizada, omitiendo medio');
-          continue;
-        }
-
-        String? mediaUrl;
-        
-        // Subir archivo multimedia
-        if (medio.rutaLocal != null && await File(medio.rutaLocal!).exists()) {
-          final folder = medio.tipo == TipoMedio.foto ? 'fotos' : 'audios';
-          final extension = medio.tipo == TipoMedio.foto ? 'jpg' : 'mp3';
-          print('   📤 Subiendo archivo...');
-          mediaUrl = await _uploadFile(
-            File(medio.rutaLocal!),
-            '$folder/${_auth.currentUser!.uid}/${medio.id}_${DateTime.now().millisecondsSinceEpoch}.$extension',
-          );
-        }
-
-        final medioData = {
-          'encuestaId': encuesta!.firebaseId,
-          'tipo': medio.tipo.toString().split('.').last,
-          'rutaRemota': mediaUrl,
-          'descripcion': medio.descripcion,
-          'userId': _auth.currentUser!.uid,
-          'createdAt': Timestamp.fromDate(medio.createdAt ?? DateTime.now()),
-          'updatedAt': Timestamp.fromDate(DateTime.now()),
-        };
-
-        DocumentReference docRef;
-        
-        if (medio.firebaseId != null) {
-          docRef = _firestore.collection('medios').doc(medio.firebaseId);
-          await docRef.update(medioData);
-          print('   ✅ Medio actualizado en Firestore');
-        } else {
-          docRef = await _firestore.collection('medios').add(medioData);
-          print('   ✅ Medio creado en Firestore con ID: ${docRef.id}');
-        }
-
-        final medioActualizado = medio.copyWith(
-          firebaseId: docRef.id,
-          urlRemota: mediaUrl,
-          estadoSinc: EstadoSincronizacion.sincronizada,
-          updatedAt: DateTime.now(),
-        );
-        
-        await _localDb.saveMedio(medioActualizado);
-        print('   ✅ Medio actualizado en Hive');
-        
-      } catch (e) {
-        print('   ❌ Error sincronizando medio: $e');
-        final medioConError = medio.copyWith(
-          estadoSinc: EstadoSincronizacion.error,
-        );
-        await _localDb.saveMedio(medioConError);
-      }
-    }
-  }
+  /// Sincroniza medios (fotos/audios) pendientes desde Hive a Storage + Firestore.
+  /// Dependen de que la encuesta tenga firebaseId.
 
   // ===== MÉTODOS AUXILIARES =====
 
-  /// Sube un archivo a Firebase Storage
-  Future<String> _uploadFile(File file, String path) async {
-    try {
-      final ref = _storage.ref().child(path);
-      final uploadTask = await ref.putFile(file);
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
-      return downloadUrl;
-    } catch (e) {
-      throw Exception('Error subiendo archivo: $e');
-    }
-  }
-
-  /// Obtiene estadísticas de sincronización
+  /// Devuelve conteos para UI (badge, indicador, etc.)
   Future<Map<String, int>> getSyncStats() async {
     final fincasPendientes = await _localDb.getFincasPendientesSinc();
     final encuestasPendientes = await _localDb.getEncuestasPendientesSinc();
@@ -350,7 +222,9 @@ class SyncService {
       'fincas': fincasPendientes.length,
       'encuestas': encuestasPendientes.length,
       'medios': mediosPendientes.length,
-      'total': fincasPendientes.length + encuestasPendientes.length + mediosPendientes.length,
+      'total': fincasPendientes.length +
+          encuestasPendientes.length +
+          mediosPendientes.length,
     };
   }
 }

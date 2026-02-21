@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:tizon_app/app/di.dart';
 
 import '../../../../models/biochar_batch.dart';
 import '../../../../models/biochar_media.dart';
@@ -174,7 +175,7 @@ class BiocharFormController extends ChangeNotifier {
       // 4) si hay internet, dispara sync (usa tu SyncService actual)
       if (ConnectivityService().isOnline) {
         // si tu SyncService ya hace syncAll, esto entra en tu pipeline
-        await SyncService().syncAll();
+        await getIt<SyncService>().syncAll();
       }
 
       _state = _state.copyWith(loading: false);
