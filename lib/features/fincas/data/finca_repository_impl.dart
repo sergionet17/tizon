@@ -1,5 +1,5 @@
 import 'package:tizon_app/app/di.dart';
-import 'package:tizon_app/features/fincas/presentation/domain/finca_repository.dart';
+import 'package:tizon_app/features/fincas/domain/finca_repository.dart';
 import 'package:tizon_app/models/finca.dart';
 import 'package:tizon_app/services/local_db_service.dart';
 
@@ -12,10 +12,10 @@ class FincaRepositoryImpl implements FincaRepository {
     return _localDb.getFincas();
   }
 
-  @override
-  Future<Finca?> getFinca(String id) async {
-    return _localDb.getFinca(id as int);
-  }
+@override
+Future<Finca?> getFinca(int id) async {
+  return _localDb.getFinca(id);
+}
 
   @override
   Future<void> saveFinca(Finca finca) async {
@@ -28,8 +28,8 @@ class FincaRepositoryImpl implements FincaRepository {
     await _localDb.saveFinca(finca);
   }
 
-  @override
-  Future<void> deleteFinca(String id) async {
-    await _localDb.deleteFinca(id as int);
-  }
+@override
+Future<void> deleteFinca(int id) async {
+  await _localDb.deleteFinca(id);
+}
 }

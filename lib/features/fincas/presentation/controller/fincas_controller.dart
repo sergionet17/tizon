@@ -1,5 +1,5 @@
 import 'package:tizon_app/app/di.dart';
-import 'package:tizon_app/features/fincas/presentation/domain/finca_repository.dart';
+import 'package:tizon_app/features/fincas/domain/finca_repository.dart';
 import 'package:tizon_app/models/finca.dart';
 
 class FincasController {
@@ -16,7 +16,7 @@ class FincasController {
   }
 
   /// Eliminar finca
-  Future<void> deleteFinca(String id) async {
-    await _repo.deleteFinca(id);
-  }
+Future<void> deleteFinca(int id) async {
+  await _repo.deleteFinca(id);
+}
 }

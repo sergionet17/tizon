@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:tizon_app/app/di.dart';
-import 'package:tizon_app/features/fincas/presentation/domain/finca_repository.dart';
+import 'package:tizon_app/features/fincas/domain/finca_repository.dart';
 
 // ✅ IMPORTANTE: Eliminamos el import de google_maps_flutter para evitar conflictos
 // Importamos directamente tus modelos
@@ -26,10 +26,9 @@ class FincasScreen extends StatefulWidget {
 }
 
 class _FincasScreenState extends State<FincasScreen> {
-  final fincas = await _controller.loadFincas();
+  final FincasController _controller = FincasController();
   List<Finca> _fincas = [];
   bool _isLoading = true;
-  final FincasController _controller = FincasController();
 
   @override
   void initState() {
@@ -43,7 +42,7 @@ class _FincasScreenState extends State<FincasScreen> {
 
     try {
       // 1. Carga Local (Hive)
-      final fincasLocales = await _fincaRepo.getFincas();
+      final fincasLocales = await _controller.loadFincas();
       setState(() {
         _fincas = fincasLocales;
         if (fincasLocales.isNotEmpty) _isLoading = false;
@@ -61,7 +60,7 @@ class _FincasScreenState extends State<FincasScreen> {
 
         if (snapshot.docs.isNotEmpty) {
           // 1. Obtenemos las fincas que ya tenemos en local para comparar
-          final fincasLocalesActuales = await _fincaRepo.getFincas();
+          final fincasLocalesActuales = await _controller.loadFincas();
 
           for (var doc in snapshot.docs) {
             final data = doc.data();
@@ -87,7 +86,7 @@ class _FincasScreenState extends State<FincasScreen> {
               );
 
               // Solo guardamos si es realmente nueva
-              await _fincaRepo.saveFinca(fincaRemota);
+              await _controller.saveFinca(fincaRemota);
               print("📌 Nueva finca sincronizada: ${fincaRemota.nombre}");
             } else {
               print(
@@ -96,7 +95,7 @@ class _FincasScreenState extends State<FincasScreen> {
           }
 
           // 3. RE-CARGAMOS DESDE HIVE (ya sin duplicados)
-          final fincasActualizadas = await _fincaRepo.getFincas();
+          final fincasActualizadas = await _controller.loadFincas();
           if (mounted) {
             setState(() => _fincas = fincasActualizadas);
           }
@@ -140,7 +139,7 @@ class _FincasScreenState extends State<FincasScreen> {
     );
 
     if (confirmed == true) {
-      await _fincaRepo.deleteFinca(finca.id! as String);
+      await _controller.deleteFinca(finca.id!);
       _loadFincas();
     }
   }
