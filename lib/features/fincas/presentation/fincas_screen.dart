@@ -4,19 +4,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:tizon_app/app/di.dart';
 import 'package:tizon_app/features/fincas/domain/finca_repository.dart';
-
-// ✅ IMPORTANTE: Eliminamos el import de google_maps_flutter para evitar conflictos
-// Importamos directamente tus modelos
 import '../../../models/finca.dart';
-import '../../../models/common.dart'; // Aquí es donde viven LatLng y EstadoSincronizacion
-
+import '../../../models/common.dart';
 import '../../../services/local_db_service.dart';
-import '../../../widgets/tizon_logo.dart';
 import '../../../widgets/sync_indicator.dart';
 import 'add_finca_screen.dart';
 import '../../../core/logger/app_logger.dart';
-import '../../auth/presentation/registro_screen.dart';
+import 'finca_detalle_screen.dart';
 import 'controller/fincas_controller.dart';
+import 'package:tizon_app/shared/widgets/tizon_bottom_nav.dart';
 
 class FincasScreen extends StatefulWidget {
   const FincasScreen({super.key});
@@ -39,16 +35,13 @@ class _FincasScreenState extends State<FincasScreen> {
 
   Future<void> _loadFincas() async {
     if (_fincas.isEmpty) setState(() => _isLoading = true);
-
     try {
-      // 1. Carga Local (Hive)
       final fincasLocales = await _controller.loadFincas();
       setState(() {
         _fincas = fincasLocales;
         if (fincasLocales.isNotEmpty) _isLoading = false;
       });
 
-      // 2. Sincronización con Firebase
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         final snapshot = await FirebaseFirestore.instance
@@ -56,21 +49,12 @@ class _FincasScreenState extends State<FincasScreen> {
             .where('userId', isEqualTo: user.uid)
             .get();
 
-// ... dentro de _loadFincas, en la parte de Firebase:
-
         if (snapshot.docs.isNotEmpty) {
-          // 1. Obtenemos las fincas que ya tenemos en local para comparar
           final fincasLocalesActuales = await _controller.loadFincas();
-
           for (var doc in snapshot.docs) {
             final data = doc.data();
             final remoteId = doc.id;
-
-            // 2. BUSCAMOS SI YA EXISTE:
-            // Comprobamos si alguna finca local tiene el mismo firebaseId
-            bool yaExiste =
-                fincasLocalesActuales.any((f) => f.firebaseId == remoteId);
-
+            bool yaExiste = fincasLocalesActuales.any((f) => f.firebaseId == remoteId);
             if (!yaExiste) {
               final fincaRemota = Finca(
                 nombre: data['nombre'] ?? 'Sin nombre',
@@ -84,31 +68,19 @@ class _FincasScreenState extends State<FincasScreen> {
                 estadoSinc: EstadoSincronizacion.sincronizada,
                 updatedAt: DateTime.now(),
               );
-
-              // Solo guardamos si es realmente nueva
               await _controller.saveFinca(fincaRemota);
-              print("📌 Nueva finca sincronizada: ${fincaRemota.nombre}");
-            } else {
-              print(
-                  "⏩ Finca saltada (ya existe localmente): ${data['nombre']}");
             }
           }
-
-          // 3. RE-CARGAMOS DESDE HIVE (ya sin duplicados)
           final fincasActualizadas = await _controller.loadFincas();
-          if (mounted) {
-            setState(() => _fincas = fincasActualizadas);
-          }
+          if (mounted) setState(() => _fincas = fincasActualizadas);
         }
       }
     } catch (e) {
-      debugPrint("❌ Error en _loadFincas: $e");
+      debugPrint('❌ Error en _loadFincas: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // --- El resto de los métodos se mantienen igual ---
 
   Future<void> _navigateToAddFinca() async {
     final result = await Navigator.push(
@@ -122,9 +94,9 @@ class _FincasScreenState extends State<FincasScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Eliminar finca'),
-        content:
-            Text('¿Estás seguro de que deseas eliminar "${finca.nombre}"?'),
+        content: Text('¿Eliminar "${finca.nombre}"?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -137,7 +109,6 @@ class _FincasScreenState extends State<FincasScreen> {
         ],
       ),
     );
-
     if (confirmed == true) {
       await _controller.deleteFinca(finca.id!);
       _loadFincas();
@@ -151,70 +122,73 @@ class _FincasScreenState extends State<FincasScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
+            // Header
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Tizón SAS',
-                      style:
-                          TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 10),
-                  TizonLogo(
-                      size: 40, showText: false, color: Colors.grey.shade700),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Mis Fincas',
-                      style:
-                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.arrow_back_ios_new, size: 16),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text('Mis Fincas',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  ),
                   if (_fincas.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                          color: const Color(0xFF66BB6A),
-                          borderRadius: BorderRadius.circular(20)),
-                      child: Text('${_fincas.length}',
+                        color: const Color(0xFF1B5E20),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('${_fincas.length} finca${_fincas.length != 1 ? 's' : ''}',
                           style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold)),
+                              color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                     ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+
             const SyncIndicator(),
+
+            // Contenido
             Expanded(
               child: _isLoading
-                  ? const Center(
-                      child:
-                          CircularProgressIndicator(color: Color(0xFF66BB6A)))
+                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF66BB6A)))
                   : RefreshIndicator(
                       onRefresh: _loadFincas,
+                      color: const Color(0xFF66BB6A),
                       child: SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
-                            if (_fincas.isNotEmpty)
-                              ..._fincas.map((finca) => _FincaCard(
-                                    finca: finca,
-                                    onTap: () => Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                            builder: (_) =>
-                                                RegistroScreen(finca: finca))),
-                                    onDelete: () => _deleteFinca(finca),
-                                  )),
-                            if (_fincas.isEmpty) _buildEmptyState(),
-                            const SizedBox(height: 20),
+                            // Botón agregar — siempre arriba
                             _buildAddButton(),
+                            const SizedBox(height: 20),
+
+                            if (_fincas.isEmpty) _buildEmptyState(),
+
+                            // Lista de fincas
+                            ..._fincas.map((finca) => _FincaCard(
+                                  finca: finca,
+                                  onTap: () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (_) => FincaDetalleScreen(finca: finca))),
+                                  onDelete: () => _deleteFinca(finca),
+                                )),
+
                             const SizedBox(height: 40),
                           ],
                         ),
@@ -224,83 +198,241 @@ class _FincasScreenState extends State<FincasScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: _buildBottomNav(),
+      bottomNavigationBar: TizonBottomNav(currentIndex: 0),
     );
   }
 
   Widget _buildEmptyState() {
     return Container(
-      margin: const EdgeInsets.only(top: 20),
-      padding: const EdgeInsets.all(24),
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(20)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
       child: Column(
         children: [
-          Icon(Icons.agriculture_outlined,
-              size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          const Text('¡Aún no tienes fincas!',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.agriculture_outlined,
+                size: 56, color: Colors.green.shade300),
+          ),
+          const SizedBox(height: 20),
+          const Text('Aún no tienes fincas',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Agrega tu primera finca\npara comenzar a registrar',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
         ],
       ),
     );
   }
 
   Widget _buildAddButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton.icon(
-        onPressed: _navigateToAddFinca,
-        style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF66BB6A),
-            foregroundColor: Colors.white),
-        icon: const Icon(Icons.add),
-        label: const Text('Registrar Nueva Finca'),
+    return GestureDetector(
+      onTap: _navigateToAddFinca,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1B5E20), Color(0xFF388E3C)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1B5E20).withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.add, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Registrar nueva finca',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  Text('Agrega una finca para registrar biocarbón',
+                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
+          ],
+        ),
       ),
     );
   }
-
-  Widget _buildBottomNav() {
-    return BottomNavigationBar(
-      selectedItemColor: const Color(0xFF66BB6A),
-      items: const [
-        BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Inicio'),
-        BottomNavigationBarItem(
-            icon: Icon(Icons.assignment), label: 'Registro'),
-        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Perfil'),
-      ],
-    );
-  }
 }
-
-// --- Cards auxiliares ---
 
 class _FincaCard extends StatelessWidget {
   final Finca finca;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _FincaCard(
-      {required this.finca, required this.onTap, required this.onDelete});
+  const _FincaCard({required this.finca, required this.onTap, required this.onDelete});
+
+  // Color según cultivo
+  Color _cultivoColor() {
+    switch ((finca.cultivo ?? '').toLowerCase()) {
+      case 'cafe': return const Color(0xFF6D4C41);
+      case 'aguacate': return const Color(0xFF2E7D32);
+      case 'cacao': return const Color(0xFF4E342E);
+      default: return const Color(0xFF1565C0);
+    }
+  }
+
+  IconData _cultivoIcon() {
+    switch ((finca.cultivo ?? '').toLowerCase()) {
+      case 'cafe': return Icons.coffee;
+      case 'aguacate': return Icons.eco;
+      case 'cacao': return Icons.spa;
+      default: return Icons.agriculture;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
+    final color = _cultivoColor();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 15,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: InkWell(
         onTap: onTap,
-        leading: CircleAvatar(
-          backgroundColor: Colors.green.shade50,
-          child: Icon(Icons.agriculture, color: Colors.green.shade700),
-        ),
-        title: Text(finca.nombre,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(finca.cultivo ?? 'Sin cultivo'),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-          onPressed: onDelete,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Ícono cultivo
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(_cultivoIcon(), color: color, size: 26),
+              ),
+              const SizedBox(width: 14),
+
+              // Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(finca.nombre,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: color.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(finca.cultivo ?? 'Sin cultivo',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: color,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                        if (finca.area != null) ...[
+                          const SizedBox(width: 8),
+                          Text('${finca.area?.toStringAsFixed(1)} ha',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade500)),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    // Estado sincronización
+                    Row(
+                      children: [
+                        Icon(
+                          finca.estadoSinc == EstadoSincronizacion.sincronizada
+                              ? Icons.cloud_done_outlined
+                              : Icons.cloud_upload_outlined,
+                          size: 12,
+                          color: finca.estadoSinc == EstadoSincronizacion.sincronizada
+                              ? Colors.green.shade400
+                              : Colors.orange.shade400,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          finca.estadoSinc == EstadoSincronizacion.sincronizada
+                              ? 'Sincronizada'
+                              : 'Pendiente sync',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: finca.estadoSinc == EstadoSincronizacion.sincronizada
+                                ? Colors.green.shade400
+                                : Colors.orange.shade400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Acciones
+              Column(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.arrow_forward_ios,
+                        size: 14, color: Colors.grey.shade400),
+                    onPressed: onTap,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(height: 8),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        size: 18, color: Colors.redAccent),
+                    onPressed: onDelete,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

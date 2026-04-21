@@ -1,4 +1,5 @@
 // lib/services/sync_service.dart
+import 'package:tizon_app/services/auth_service.dart';
 
 // Dart: utilidades de async (Stream, StreamController, StreamSubscription)
 import 'dart:async';
@@ -98,6 +99,8 @@ class SyncService {
         );
 
         if (online) {
+          // Sync usuarios offline primero
+          try { await getIt<AuthService>().syncOfflineUsers(); } catch(_) {}
           // ignore: avoid_print
           print(
               '✅ [SYNC] Conexión detectada, iniciando sincronización automática...');

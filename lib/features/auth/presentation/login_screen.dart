@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
 import 'package:tizon_app/services/auth_service.dart';
 import 'package:tizon_app/services/connectivity_service.dart';
+import 'package:tizon_app/widgets/tizon_logo.dart';
 import 'package:tizon_app/widgets/connectivity_indicator.dart';
 import 'package:tizon_app/features/home/presentation/home_screen.dart';
 
@@ -32,12 +33,12 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
 
-    final email = '${_cedula.text.trim()}@tizon.app';
+    final cedula = _cedula.text.trim();
     final password = _pass1.text.trim();
 
     final err = _isRegistering
-        ? await _auth.registerEmail(email, password)
-        : await _auth.signInEmail(email, password);
+        ? await _auth.registerEmail(cedula, password)
+        : await _auth.signInEmail(cedula, password);
 
     if (!mounted) return;
 
@@ -98,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (!mounted) return;
 
         final users = box.get('usuarios_local', defaultValue: []) as List;
-        users.add({'email': email, 'password': password});
+        users.add({'cedula': cedula, 'password': password});
         await box.put('usuarios_local', users);
         if (!mounted) return;
 
@@ -184,22 +185,16 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 const SizedBox(height: 20),
 
-                // ✅ Logo + nombre + rombo fluorescente
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text(
-                      'Tizón SAS',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Icon(Icons.hexagon_outlined,
-                        size: 30, color: Colors.greenAccent.shade400),
-                  ],
+                // Logo elaborado
+                const TizonLogo(size: 80, showText: false),
+                const SizedBox(height: 12),
+                const Text(
+                  'Tizón SAS',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
                 ),
 
                 const SizedBox(height: 20),
@@ -320,7 +315,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return TextFormField(
       controller: _pass1,
       obscureText: true,
-      decoration: _inputDecoration('Ingresa tu contraseña'),
+      decoration: _inputDecoration('Contraseña (por defecto tu cédula)'),
       validator: (v) {
         if (v == null || v.isEmpty) return 'Ingresa tu contraseña';
         if (v.length < 6) return 'Mínimo 6 caracteres';

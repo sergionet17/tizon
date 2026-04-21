@@ -1,174 +1,259 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:hive/hive.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:tizon_app/features/auth/domain/auth_repository.dart';
-
 import 'connectivity_service.dart';
 import 'sync_service.dart';
 import 'package:tizon_app/app/di.dart';
 
 class AuthService implements AuthRepository {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final ConnectivityService _connectivity = getIt<ConnectivityService>();
-  final SyncService _sync = getIt<SyncService>();
+  final FirebaseAuth _auth       = FirebaseAuth.instance;
+  final FirebaseFirestore _fs    = FirebaseFirestore.instance;
+  final ConnectivityService _con = getIt<ConnectivityService>();
+  final SyncService _sync        = getIt<SyncService>();
 
-  /// Inicia sesión con email y contraseña.
-  /// Retorna null si fue exitoso, o un mensaje/código de error si falla.
-  Future<String?> signInEmail(String email, String password) async {
-    final box = await Hive.openBox('usuarios');
+  static const _boxName          = 'usuarios';
+  static const _keyPendientes    = 'pendientes_sync';
+  static const _keySesionActual  = 'sesion_actual';
 
-    // ✅ LOGIN OFFLINE
-    if (!_connectivity.isOnline) {
-      final users = box.get('usuarios_local', defaultValue: []) as List;
+  Future<Box> get _box async => Hive.openBox(_boxName);
 
-      final exists = users.any((u) =>
-          u['email'] == email.trim() && u['password'] == password.trim());
+  // ── Device ID ────────────────────────────────────────────────────
 
-      if (exists) {
-        // ignore: avoid_print
-        print('[OFFLINE] Usuario válido en el dispositivo');
+  Future<String> getDeviceId() async {
+    final info = DeviceInfoPlugin();
+    final android = await info.androidInfo;
+    return android.id; // ID único del dispositivo Android
+  }
+
+  // ── Sesión activa ─────────────────────────────────────────────────
+
+  Future<String?> getSesionActual() async {
+    final box = await _box;
+    return box.get(_keySesionActual) as String?;
+  }
+
+  Future<void> _guardarSesionActual(String cedula) async {
+    final box = await _box;
+    await box.put(_keySesionActual, cedula);
+  }
+
+  Future<void> _borrarSesionActual() async {
+    final box = await _box;
+    await box.delete(_keySesionActual);
+  }
+
+  // ── Pendientes de sync ────────────────────────────────────────────
+
+  Future<void> _agregarPendienteSync(String cedula, String password) async {
+    final box = await _box;
+    final pendientes = List<Map>.from(
+        box.get(_keyPendientes, defaultValue: <Map>[]));
+    final yaExiste = pendientes.any((u) => u['cedula'] == cedula);
+    if (!yaExiste) {
+      pendientes.add({'cedula': cedula, 'password': password});
+      await box.put(_keyPendientes, pendientes);
+    }
+  }
+
+  // ── Registrar deviceId en Firestore ──────────────────────────────
+
+  Future<void> _registrarDispositivo(String cedula) async {
+    try {
+      final deviceId = await getDeviceId();
+      final info     = DeviceInfoPlugin();
+      final android  = await info.androidInfo;
+      final modelo   = '${android.brand} ${android.model}';
+
+      final ref = _fs.collection('usuarios').doc(cedula);
+      await ref.set({
+        'cedula': cedula,
+        'dispositivos': FieldValue.arrayUnion([
+          {
+            'deviceId':   deviceId,
+            'modelo':     modelo,
+            'registrado': DateTime.now().toIso8601String(),
+            'activo':     true,
+          }
+        ]),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      // Si falla (sin internet) se reintentará en la próxima sync
+      print('[DEVICE] No se pudo registrar dispositivo: $e');
+    }
+  }
+
+  // ── Login ─────────────────────────────────────────────────────────
+
+  Future<String?> signInEmail(String cedula, String password) async {
+    final email = '$cedula@tizon.app';
+
+    // LOGIN ONLINE
+    if (_con.isOnline) {
+      try {
+        await _auth.signInWithEmailAndPassword(
+            email: email, password: password);
+        await _guardarSesionActual(cedula);
+        await _registrarDispositivo(cedula);
         return null;
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'user-not-found')     return 'Cédula no registrada.';
+        if (e.code == 'wrong-password')     return 'Contraseña incorrecta.';
+        if (e.code == 'invalid-credential') return 'Cédula o contraseña incorrecta.';
+        return e.message;
       }
-
-      return 'NO_LOCAL_USER';
     }
 
-    // ✅ LOGIN ONLINE
-    try {
-      await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: password.trim(),
-      );
+    // LOGIN OFFLINE
+    // Solo permite entrar si esta cédula ya inició sesión antes en este dispositivo
+    final sesionPrevia = await getSesionActual();
+    final box = await _box;
+    final pendientes = List<Map>.from(
+        box.get(_keyPendientes, defaultValue: <Map>[]));
+
+    // ¿Se registró offline en este dispositivo?
+    final enPendientes = pendientes.any((u) =>
+        u['cedula'] == cedula && u['password'] == password);
+
+    if (enPendientes) {
+      await _guardarSesionActual(cedula);
+      print('[OFFLINE] Login exitoso (pendiente sync): $cedula');
       return null;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'user-not-found') {
-        return 'El usuario no existe en nuestros registros.';
-      }
-      if (e.code == 'wrong-password') {
-        return 'La contraseña es incorrecta.';
-      }
-      if (e.code == 'invalid-credential') {
-        return 'Credenciales inválidas. Verifica tu cédula y contraseña.';
-      }
-      return e.message;
     }
+
+    // ¿Es el último usuario que se logueó con internet en este dispositivo?
+    if (sesionPrevia == cedula) {
+      print('[OFFLINE] Sesión previa encontrada: $cedula');
+      return null;
+    }
+
+    return 'Sin conexión. Solo puedes ingresar con la cédula que usaste la última vez en este dispositivo.';
   }
 
-  /// Registra usuario con email y contraseña.
-  /// Retorna null si fue exitoso, o un mensaje/código de error si falla.
-  Future<String?> registerEmail(String email, String password) async {
-    final box = await Hive.openBox('usuarios');
+  // ── Registro ──────────────────────────────────────────────────────
 
-    // ✅ REGISTRO OFFLINE
-    if (!ConnectivityService().isOnline) {
-      final users = box.get('usuarios_local', defaultValue: []) as List;
-      users.add({'email': email.trim(), 'password': password.trim()});
-      await box.put('usuarios_local', users);
-      // ignore: avoid_print
-      print('[OFFLINE] Usuario guardado offline: $email');
-      return null;
-    }
+  Future<String?> registerEmail(String cedula, String password) async {
+    final email = '$cedula@tizon.app';
 
-    // ✅ REGISTRO ONLINE
-    try {
-      await _auth.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: password.trim(),
-      );
-      return null;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'email-already-in-use') {
-        return 'Este usuario ya está registrado.';
+    // REGISTRO ONLINE
+    if (_con.isOnline) {
+      try {
+        await _auth.createUserWithEmailAndPassword(
+            email: email, password: password);
+        await _guardarSesionActual(cedula);
+        await _registrarDispositivo(cedula);
+        return null;
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') return 'Esta cédula ya está registrada.';
+        return e.message;
       }
-      return e.message;
     }
+
+    // REGISTRO OFFLINE
+    await _agregarPendienteSync(cedula, password);
+    await _guardarSesionActual(cedula);
+    print('[OFFLINE] Cédula registrada offline: $cedula');
+    return null;
   }
+
+  // ── Google (mantener por compatibilidad) ──────────────────────────
 
   Future<String?> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      final googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return 'Inicio de sesión cancelado';
 
       final googleAuth = await googleUser.authentication;
-
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+        idToken:     googleAuth.idToken,
       );
 
-      await _auth.signInWithCredential(credential);
+      final result = await _auth.signInWithCredential(credential);
+      final email  = result.user?.email ?? '';
+      // Para Google usamos el email completo como identificador
+      await _guardarSesionActual(email);
       return null;
     } catch (e) {
       return e.toString();
     }
   }
 
+  // ── Sync pendientes → Firebase ────────────────────────────────────
+
   @override
   Future<void> syncOfflineUsers() async {
-    if (ConnectivityService().isOnline) {
-      final box = await Hive.openBox('usuarios');
-      final users = box.get('usuarios_local', defaultValue: []) as List;
+    if (!_con.isOnline) return;
 
-      if (users.isNotEmpty) {
-        _sync.startSync();
+    final box = await _box;
+    final pendientes = List<Map>.from(
+        box.get(_keyPendientes, defaultValue: <Map>[]));
 
-        for (final user in users) {
+    if (pendientes.isEmpty) return;
+
+    _sync.startSync();
+    final fallidos = <Map>[];
+
+    for (final user in pendientes) {
+      // Limpiar cédula por si acaso viene con @tizon.app de versiones anteriores
+      var cedula = (user['cedula'] ?? user['email'] ?? '').toString();
+      cedula = cedula.replaceAll('@tizon.app', '').trim();
+      final password = (user['password'] ?? '').toString();
+      final email    = '$cedula@tizon.app';
+
+      try {
+        await _auth.createUserWithEmailAndPassword(
+            email: email, password: password);
+        await _registrarDispositivo(cedula);
+        print('[SYNC] Cédula creada en Firebase: $cedula');
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
           try {
-            await _auth.createUserWithEmailAndPassword(
-              email: (user['email'] ?? '').toString(),
-              password: (user['password'] ?? '').toString(),
-            );
-            // ignore: avoid_print
-            print('[SYNC] Usuario creado: ${user['email']}');
+            await _auth.signInWithEmailAndPassword(
+                email: email, password: password);
+            await _registrarDispositivo(cedula);
+            print('[SYNC] Cédula ya existía, login exitoso: $cedula');
           } catch (_) {
-            try {
-              await _auth.signInWithEmailAndPassword(
-                email: (user['email'] ?? '').toString(),
-                password: (user['password'] ?? '').toString(),
-              );
-              // ignore: avoid_print
-              print('[SYNC] Usuario logueado: ${user['email']}');
-            } catch (e) {
-              // ignore: avoid_print
-              print('[SYNC] Falló: ${user['email']} → $e');
-            }
+            fallidos.add(user);
           }
+        } else {
+          fallidos.add(user);
         }
-
-        await box.delete('usuarios_local');
-        _sync.endSync();
       }
     }
+
+    await box.put(_keyPendientes, fallidos);
+    _sync.endSync();
   }
+
+  // ── Cerrar sesión ─────────────────────────────────────────────────
 
   @override
   Future<void> signOut() async {
+    await _borrarSesionActual();
     await _auth.signOut();
     await GoogleSignIn().signOut();
   }
 
-  // ===== Implementación del contrato AuthRepository =====
+  // ── Contrato AuthRepository ───────────────────────────────────────
 
   @override
   Future<void> signIn(String email, String password) async {
     final err = await signInEmail(email, password);
-    if (err != null) {
-      throw Exception(err);
-    }
+    if (err != null) throw Exception(err);
   }
 
   @override
   Future<void> register(String email, String password) async {
     final err = await registerEmail(email, password);
-    if (err != null) {
-      throw Exception(err);
-    }
+    if (err != null) throw Exception(err);
   }
 
   @override
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // ===== Helpers =====
   User? get currentUser => _auth.currentUser;
 }
