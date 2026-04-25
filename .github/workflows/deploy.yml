@@ -23,7 +23,7 @@ jobs:
         run: flutter pub get
 
       - name: Compilar Flutter Web
-        run: flutter build web --release --web-renderer html
+        run: flutter build web --release
 
       - name: Desplegar a OCI via SSH
         uses: appleboy/scp-action@v0.1.7
