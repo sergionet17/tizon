@@ -1,0 +1,44 @@
+name: Deploy to OCI
+
+on:
+  push:
+    branches:
+      - refactor/clean-architecture
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.7'
+          channel: 'stable'
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Compilar Flutter Web
+        run: flutter build web --release --web-renderer html
+
+      - name: Desplegar a OCI via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          source: "build/web/*"
+          target: "/var/www/html"
+          strip_components: 2
+
+      - name: Recargar Nginx
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: sudo systemctl reload nginx
