@@ -11,8 +11,10 @@ class Finca {
   @HiveField(1)
   String nombre;
 
+  /// Legacy: centroide guardado para compatibilidad con datos viejos.
+  /// Para fincas nuevas se calcula automáticamente desde [poligono].
   @HiveField(2)
-  LatLng ubicacion;
+  LatLng? ubicacion;
 
   @HiveField(3)
   String? firebaseId;
@@ -38,10 +40,14 @@ class Finca {
   @HiveField(10)
   EstadoSincronizacion estadoSinc;
 
+  /// Lista de puntos que definen el polígono de la finca.
+  @HiveField(11)
+  List<LatLng> poligono;
+
   Finca({
     this.id,
     required this.nombre,
-    required this.ubicacion,
+    this.ubicacion,
     this.firebaseId,
     this.cultivo,
     this.area,
@@ -50,7 +56,29 @@ class Finca {
     this.createdAt,
     this.updatedAt,
     this.estadoSinc = EstadoSincronizacion.pendiente,
-  });
+    List<LatLng>? poligono,
+  }) : poligono = poligono ??
+            (ubicacion != null ? [ubicacion] : []);
+
+  /// Centro geométrico del polígono. Si no hay polígono usa [ubicacion] legacy.
+  LatLng get centroide {
+    if (poligono.isNotEmpty) {
+      final lat =
+          poligono.map((p) => p.latitude).reduce((a, b) => a + b) /
+              poligono.length;
+      final lng =
+          poligono.map((p) => p.longitude).reduce((a, b) => a + b) /
+              poligono.length;
+      return LatLng(latitude: lat, longitude: lng);
+    }
+    return ubicacion ?? const LatLng(latitude: 1.853, longitude: -76.050);
+  }
+
+  /// Texto para mostrar la ubicación (usa el centroide).
+  String get ubicacionTexto {
+    final c = centroide;
+    return '${c.latitude.toStringAsFixed(6)}, ${c.longitude.toStringAsFixed(6)}';
+  }
 
   Finca copyWith({
     int? id,
@@ -64,6 +92,7 @@ class Finca {
     DateTime? createdAt,
     DateTime? updatedAt,
     EstadoSincronizacion? estadoSinc,
+    List<LatLng>? poligono,
   }) {
     return Finca(
       id: id ?? this.id,
@@ -77,8 +106,7 @@ class Finca {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       estadoSinc: estadoSinc ?? this.estadoSinc,
+      poligono: poligono ?? this.poligono,
     );
   }
-
-  String get ubicacionTexto => '${ubicacion.latitude},${ubicacion.longitude}';
 }

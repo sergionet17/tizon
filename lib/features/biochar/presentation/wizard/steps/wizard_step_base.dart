@@ -71,34 +71,70 @@ class WizardStepBase extends StatelessWidget {
           child: SizedBox(
             width: double.infinity,
             height: 54,
-            child: ElevatedButton(
-              onPressed: (puedeAvanzar && !cargando) ? onNext : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1B5E20),
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.grey.shade300,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                elevation: 0,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 250),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: (puedeAvanzar && !cargando)
+                    ? const LinearGradient(
+                        colors: [Color(0xFF2E7D32), Color(0xFF1B5E20)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: (puedeAvanzar && !cargando)
+                    ? null
+                    : Colors.grey.shade300,
+                boxShadow: (puedeAvanzar && !cargando)
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFF1B5E20).withOpacity(0.35),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        )
+                      ]
+                    : [],
               ),
-              child: cargando
-                  ? const SizedBox(
-                      width: 22, height: 22,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(labelBoton,
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w600)),
-                        if (!esUltimoPaso) ...[
-                          const SizedBox(width: 8),
-                          const Icon(Icons.arrow_forward, size: 18),
-                        ],
-                      ],
-                    ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: (puedeAvanzar && !cargando) ? onNext : null,
+                  child: Center(
+                    child: cargando
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                labelBoton,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: (puedeAvanzar && !cargando)
+                                      ? Colors.white
+                                      : Colors.grey.shade500,
+                                ),
+                              ),
+                              if (!esUltimoPaso) ...[
+                                const SizedBox(width: 8),
+                                Icon(
+                                  Icons.arrow_forward,
+                                  size: 18,
+                                  color: (puedeAvanzar && !cargando)
+                                      ? Colors.white
+                                      : Colors.grey.shade500,
+                                ),
+                              ],
+                            ],
+                          ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),

@@ -49,9 +49,19 @@ class FincasSyncHandler implements SyncHandler {
           );
         }
 
+        final centroide = finca.centroide;
+
         final fincaData = {
           'nombre': finca.nombre,
-          'ubicacion': finca.ubicacion,
+          // Centroide legacy (compatibilidad con versiones anteriores)
+          'ubicacion': {
+            'latitude': centroide.latitude,
+            'longitude': centroide.longitude,
+          },
+          // Polígono completo
+          'poligono': finca.poligono
+              .map((p) => {'lat': p.latitude, 'lng': p.longitude})
+              .toList(),
           'cultivo': finca.cultivo,
           'area': finca.area,
           'imageUrl': imageUrl,

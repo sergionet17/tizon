@@ -7,6 +7,7 @@ import 'package:tizon_app/services/local_image_service.dart';
 
 import '../../../models/finca.dart';
 import '../../../models/common.dart';
+import '../../../widgets/polygon_map_picker.dart';
 
 class AddFincaScreen extends StatefulWidget {
   const AddFincaScreen({super.key});
@@ -18,7 +19,6 @@ class AddFincaScreen extends StatefulWidget {
 class _AddFincaScreenState extends State<AddFincaScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nombreController = TextEditingController();
-  final _ubicacionController = TextEditingController();
   final _cultivoController = TextEditingController();
   final _areaController = TextEditingController();
 
@@ -26,19 +26,46 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
   final _imageService = LocalImageService();
   final _picker = ImagePicker();
 
-  // ✅ En web NO uses File. Guarda XFile.
   XFile? _imageFile;
-
   bool _isLoading = false;
+
+  // ── Polígono ──────────────────────────────────────────────────────────────
+  List<LatLng> _poligono = [];
+  double _areaHa = 0;
 
   @override
   void dispose() {
     _nombreController.dispose();
-    _ubicacionController.dispose();
     _cultivoController.dispose();
     _areaController.dispose();
     super.dispose();
   }
+
+  // ── Mapa ──────────────────────────────────────────────────────────────────
+
+  Future<void> _openMapPicker() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => PolygonMapPicker(
+          initialPoints: _poligono,
+          onFinish: (points, areaHa) {
+            setState(() {
+              _poligono = points;
+              _areaHa = areaHa;
+              // Auto-rellenar el campo de área
+              _areaController.text = areaHa.toStringAsFixed(2);
+            });
+            Navigator.pop(context);
+          },
+          onCancel: () => Navigator.pop(context),
+        ),
+      ),
+    );
+  }
+
+  // ── Imagen ────────────────────────────────────────────────────────────────
 
   Future<void> _pickImage(ImageSource source) async {
     try {
@@ -48,11 +75,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
         maxHeight: 1080,
         imageQuality: 85,
       );
-
       if (pickedFile != null) {
-        setState(() {
-          _imageFile = pickedFile;
-        });
+        setState(() => _imageFile = pickedFile);
       }
     } catch (e) {
       if (mounted) {
@@ -107,8 +131,10 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                     color: const Color(0xFF66BB6A).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child:
-                      const Icon(Icons.photo_library, color: Color(0xFF66BB6A)),
+                  child: const Icon(
+                    Icons.photo_library,
+                    color: Color(0xFF66BB6A),
+                  ),
                 ),
                 title: const Text('Seleccionar de galería'),
                 onTap: () {
@@ -123,57 +149,58 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
     );
   }
 
-  LatLng _parseLatLng(String raw) {
-    final cleaned = raw.replaceAll(';', ',').replaceAll(' ', ',');
-    final parts = cleaned.split(',').where((p) => p.trim().isNotEmpty).toList();
-    if (parts.length < 2) {
-      return const LatLng(
-          latitude: 1.853, longitude: -76.050); // fallback Pitalito
-    }
-    final lat = double.tryParse(parts[0].trim()) ?? 1.853;
-    final lng = double.tryParse(parts[1].trim()) ?? -76.050;
-    return LatLng(latitude: lat, longitude: lng);
-  }
+  // ── Guardar ───────────────────────────────────────────────────────────────
 
   Future<void> _submitForm() async {
+    // Validar polígono antes del form
+    if (_poligono.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debes definir la ubicación de la finca en el mapa'),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      // Crear la finca (sin id todavía si tu modelo lo asigna luego)
+      final areaFinal = _areaController.text.trim().isEmpty
+          ? (_areaHa > 0 ? _areaHa : null)
+          : double.tryParse(_areaController.text.trim());
+
       final nuevaFinca = Finca(
         nombre: _nombreController.text.trim(),
-        ubicacion: _parseLatLng(_ubicacionController.text.trim()),
+        poligono: _poligono,
         cultivo: _cultivoController.text.trim().isEmpty
             ? null
             : _cultivoController.text.trim(),
-        area: _areaController.text.trim().isEmpty
-            ? null
-            : double.tryParse(_areaController.text.trim()),
+        area: areaFinal,
         estadoSinc: EstadoSincronizacion.pendiente,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
       );
 
-      // Guardar en Hive
       final fincaId = await _dbService.saveFinca(nuevaFinca);
 
-      // ✅ Imagen local SOLO en móvil/desktop (en web no hay filesystem)
       if (_imageFile != null && !kIsWeb) {
         final imagePath = await _imageService.saveImage(
           File(_imageFile!.path),
           fincaId.toString(),
         );
-
         final fincaActualizada = nuevaFinca.copyWith(
           id: fincaId,
           imagePath: imagePath,
         );
         await _dbService.saveFinca(fincaActualizada);
       } else if (_imageFile != null && kIsWeb) {
-        // En web: por ahora solo mostramos preview. Guardar imagen en local filesystem NO aplica.
-        // Recomendación: subir a Firebase Storage en tu SyncService y guardar urlRemota.
         print(
-            '🌐 [AddFinca] Imagen seleccionada en Web: no se guarda como archivo local.');
+          '🌐 [AddFinca] Imagen seleccionada en Web: no se guarda como archivo local.',
+        );
       }
 
       if (mounted) {
@@ -201,6 +228,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
     }
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -227,7 +256,7 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Sección de foto
+              // ── Foto ──────────────────────────────────────────────────────
               GestureDetector(
                 onTap: _isLoading ? null : _showImageSourceDialog,
                 child: Container(
@@ -250,7 +279,7 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                               borderRadius: BorderRadius.circular(16),
                               child: kIsWeb
                                   ? Image.network(
-                                      _imageFile!.path, // blob url en web
+                                      _imageFile!.path,
                                       width: double.infinity,
                                       height: double.infinity,
                                       fit: BoxFit.cover,
@@ -269,11 +298,8 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
                                 color: Colors.black54,
                                 borderRadius: BorderRadius.circular(20),
                                 child: InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      _imageFile = null;
-                                    });
-                                  },
+                                  onTap: () =>
+                                      setState(() => _imageFile = null),
                                   borderRadius: BorderRadius.circular(20),
                                   child: const Padding(
                                     padding: EdgeInsets.all(8),
@@ -319,33 +345,13 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
 
               const SizedBox(height: 24),
 
-              // Campo Nombre
+              // ── Nombre ────────────────────────────────────────────────────
               TextFormField(
                 controller: _nombreController,
                 enabled: !_isLoading,
-                decoration: InputDecoration(
-                  labelText: 'Nombre de la finca *',
-                  prefixIcon:
-                      const Icon(Icons.agriculture, color: Color(0xFF66BB6A)),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.red, width: 1),
-                  ),
+                decoration: _inputDecoration(
+                  label: 'Nombre de la finca *',
+                  icon: Icons.agriculture,
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
@@ -357,103 +363,121 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
 
               const SizedBox(height: 16),
 
-              // Campo Ubicación
-              TextFormField(
-                controller: _ubicacionController,
-                enabled: !_isLoading,
-                decoration: InputDecoration(
-                  labelText: 'Ubicación *',
-                  prefixIcon:
-                      const Icon(Icons.location_on, color: Color(0xFF66BB6A)),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+              // ── Ubicación (botón que abre el mapa) ────────────────────────
+              GestureDetector(
+                onTap: _isLoading ? null : _openMapPicker,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
                   ),
-                  enabledBorder: OutlineInputBorder(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    border: _poligono.isEmpty
+                        ? null
+                        : Border.all(
+                            color: const Color(0xFF66BB6A),
+                            width: 2,
+                          ),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.red, width: 1),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.map_outlined,
+                        color: _poligono.isEmpty
+                            ? const Color(0xFF66BB6A)
+                            : const Color(0xFF43A047),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _poligono.isEmpty
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Ubicación de la finca *',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Toca para abrir el mapa y trazar el terreno',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade400,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Ubicación definida ✓',
+                                    style: TextStyle(
+                                      color: Colors.black87,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${_poligono.length} puntos  ·  '
+                                    '${_areaHa.toStringAsFixed(2)} ha  '
+                                    '(toca para editar)',
+                                    style: TextStyle(
+                                      color: Colors.grey.shade600,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      Icon(
+                        _poligono.isEmpty
+                            ? Icons.arrow_forward_ios
+                            : Icons.check_circle,
+                        color: _poligono.isEmpty
+                            ? Colors.grey.shade400
+                            : const Color(0xFF66BB6A),
+                        size: 18,
+                      ),
+                    ],
                   ),
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'La ubicación es obligatoria';
-                  }
-                  return null;
-                },
               ),
 
               const SizedBox(height: 16),
 
-              // Campo Cultivo
+              // ── Cultivo ───────────────────────────────────────────────────
               TextFormField(
                 controller: _cultivoController,
                 enabled: !_isLoading,
-                decoration: InputDecoration(
-                  labelText: 'Tipo de cultivo',
-                  hintText: 'Ej: Café, Plátano, Cacao...',
-                  prefixIcon:
-                      const Icon(Icons.local_florist, color: Color(0xFF66BB6A)),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
-                  ),
+                decoration: _inputDecoration(
+                  label: 'Tipo de cultivo',
+                  hint: 'Ej: Café, Plátano, Cacao...',
+                  icon: Icons.local_florist,
                 ),
               ),
 
               const SizedBox(height: 16),
 
-              // Campo Área
+              // ── Área ──────────────────────────────────────────────────────
               TextFormField(
                 controller: _areaController,
                 enabled: !_isLoading,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Área en hectáreas',
-                  hintText: 'Ej: 5.5',
-                  prefixIcon:
-                      const Icon(Icons.square_foot, color: Color(0xFF66BB6A)),
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF66BB6A), width: 2),
-                  ),
-                  errorBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Colors.red, width: 1),
-                  ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: _inputDecoration(
+                  label: 'Área en hectáreas',
+                  hint: _areaHa > 0
+                      ? 'Calculada automáticamente: ${_areaHa.toStringAsFixed(2)} ha'
+                      : 'Ej: 5.5',
+                  icon: Icons.square_foot,
                 ),
                 validator: (value) {
                   if (value != null && value.trim().isNotEmpty) {
@@ -467,7 +491,7 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
 
               const SizedBox(height: 32),
 
-              // Botón Guardar
+              // ── Guardar ───────────────────────────────────────────────────
               SizedBox(
                 height: 54,
                 child: ElevatedButton(
@@ -504,6 +528,36 @@ class _AddFincaScreenState extends State<AddFincaScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration({
+    required String label,
+    String? hint,
+    required IconData icon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      prefixIcon: Icon(icon, color: const Color(0xFF66BB6A)),
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF66BB6A), width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Colors.red, width: 1),
       ),
     );
   }

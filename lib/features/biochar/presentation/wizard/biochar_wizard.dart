@@ -54,35 +54,33 @@ class _BiocharWizardState extends State<BiocharWizard> {
   }
 
   // ── AGREGAR PASOS AQUÍ ──────────────────────────────────────────
-  // Para agregar un paso nuevo: crear el widget en wizard/steps/
-  // y agregarlo a esta lista. El wizard se adapta automáticamente.
   List<WizardStep> get _pasos => [
-    StepTipoBiomasa(
-      controller: _controller,
-      onNext: _siguiente,
-      onBack: _anterior,
-    ),
-    StepFotoBiomasa(
-      controller: _controller,
-      onNext: _siguiente,
-      onBack: _anterior,
-    ),
-    StepTemperatura(
-      controller: _controller,
-      onNext: _siguiente,
-      onBack: _anterior,
-    ),
-    StepFotosHumedad(
-      controller: _controller,
-      onNext: _siguiente,
-      onBack: _anterior,
-    ),
-    StepResumen(
-      controller: _controller,
-      onNext: _guardar,
-      onBack: _anterior,
-    ),
-  ];
+        StepTipoBiomasa(
+          controller: _controller,
+          onNext: _siguiente,
+          onBack: _anterior,
+        ),
+        StepFotoBiomasa(
+          controller: _controller,
+          onNext: _siguiente,
+          onBack: _anterior,
+        ),
+        StepTemperatura(
+          controller: _controller,
+          onNext: _siguiente,
+          onBack: _anterior,
+        ),
+        StepFotosHumedad(
+          controller: _controller,
+          onNext: _siguiente,
+          onBack: _anterior,
+        ),
+        StepResumen(
+          controller: _controller,
+          onNext: _guardar,
+          onBack: _anterior,
+        ),
+      ];
 
   void _siguiente() {
     if (_pasoActual < _pasos.length - 1) {
@@ -113,26 +111,64 @@ class _BiocharWizardState extends State<BiocharWizard> {
     }
   }
 
+  /// Muestra diálogo de confirmación antes de salir si hay datos ingresados.
+  Future<bool> _confirmarSalida() async {
+    final hayDatos = _controller.state.tipoBiomasa != null ||
+        _controller.state.biomasaImage != null ||
+        _controller.state.temperatura != null;
+
+    if (!hayDatos) return true;
+
+    final salir = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('¿Salir del registro?'),
+        content: const Text(
+            'Se perderá la información ingresada en este formulario.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Salir'),
+          ),
+        ],
+      ),
+    );
+    return salir ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final paso = _pasos[_pasoActual];
     final total = _pasos.length;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFE8F5E9),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header con progreso
-            _WizardHeader(
-              pasoActual: _pasoActual,
-              totalPasos: total,
-              titulo: paso.titulo,
-              onBack: _anterior,
-            ),
-            // Contenido del paso actual
-            Expanded(child: paso),
-          ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _confirmarSalida()) {
+          if (context.mounted) Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFE8F5E9),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _WizardHeader(
+                pasoActual: _pasoActual,
+                totalPasos: total,
+                titulo: paso.titulo,
+                onBack: _anterior,
+              ),
+              Expanded(child: paso),
+            ],
+          ),
         ),
       ),
     );
@@ -213,7 +249,6 @@ class _WizardHeader extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // Barra de progreso
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(

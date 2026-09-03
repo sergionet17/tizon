@@ -33,6 +33,33 @@ class _FincasScreenState extends State<FincasScreen> {
     _loadFincas();
   }
 
+  // ── Helpers de deserialización desde Firestore ────────────────────────────
+
+  List<LatLng> _parsePoligono(dynamic raw) {
+    if (raw is List) {
+      return raw.whereType<Map>().map((p) {
+        return LatLng(
+          latitude: (p['lat'] as num?)?.toDouble() ?? 0.0,
+          longitude: (p['lng'] as num?)?.toDouble() ?? 0.0,
+        );
+      }).toList();
+    }
+    return [];
+  }
+
+  LatLng? _parseUbicacionLegacy(dynamic raw) {
+    if (raw is Map) {
+      final lat = (raw['latitude'] as num?)?.toDouble();
+      final lng = (raw['longitude'] as num?)?.toDouble();
+      if (lat != null && lng != null) return LatLng(latitude: lat, longitude: lng);
+    }
+    // Soporte para el formato anterior que guardaba latitud/longitud separados
+    if (raw == null) return null;
+    return null;
+  }
+
+  // ── Carga de fincas ───────────────────────────────────────────────────────
+
   Future<void> _loadFincas() async {
     if (_fincas.isEmpty) setState(() => _isLoading = true);
     try {
@@ -54,17 +81,27 @@ class _FincasScreenState extends State<FincasScreen> {
           for (var doc in snapshot.docs) {
             final data = doc.data();
             final remoteId = doc.id;
-            bool yaExiste = fincasLocalesActuales.any((f) => f.firebaseId == remoteId);
+            final yaExiste =
+                fincasLocalesActuales.any((f) => f.firebaseId == remoteId);
             if (!yaExiste) {
+              final poligono = _parsePoligono(data['poligono']);
+              final ubicacionLegacy = _parseUbicacionLegacy(data['ubicacion']) ??
+                  // Soporte para formato antiguo con latitud/longitud directos
+                  (data['latitud'] != null && data['longitud'] != null
+                      ? LatLng(
+                          latitude: (data['latitud'] as num).toDouble(),
+                          longitude: (data['longitud'] as num).toDouble(),
+                        )
+                      : null);
+
               final fincaRemota = Finca(
                 nombre: data['nombre'] ?? 'Sin nombre',
-                ubicacion: LatLng(
-                  latitude: (data['latitud'] ?? 0.0).toDouble(),
-                  longitude: (data['longitud'] ?? 0.0).toDouble(),
-                ),
+                poligono: poligono,
+                ubicacion: ubicacionLegacy,
                 firebaseId: remoteId,
                 cultivo: data['cultivo'],
                 area: (data['area'] as num?)?.toDouble(),
+                imageUrl: data['imageUrl'],
                 estadoSinc: EstadoSincronizacion.sincronizada,
                 updatedAt: DateTime.now(),
               );
@@ -115,6 +152,8 @@ class _FincasScreenState extends State<FincasScreen> {
     }
   }
 
+  // ── UI ────────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -142,18 +181,24 @@ class _FincasScreenState extends State<FincasScreen> {
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text('Mis Fincas',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        style: TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold)),
                   ),
                   if (_fincas.isNotEmpty)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: const Color(0xFF1B5E20),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Text('${_fincas.length} finca${_fincas.length != 1 ? 's' : ''}',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                      child: Text(
+                        '${_fincas.length} finca${_fincas.length != 1 ? 's' : ''}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold),
+                      ),
                     ),
                 ],
               ),
@@ -164,7 +209,9 @@ class _FincasScreenState extends State<FincasScreen> {
             // Contenido
             Expanded(
               child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF66BB6A)))
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFF66BB6A)))
                   : RefreshIndicator(
                       onRefresh: _loadFincas,
                       color: const Color(0xFF66BB6A),
@@ -173,22 +220,20 @@ class _FincasScreenState extends State<FincasScreen> {
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
-                            // Botón agregar — siempre arriba
                             _buildAddButton(),
                             const SizedBox(height: 20),
-
                             if (_fincas.isEmpty) _buildEmptyState(),
-
-                            // Lista de fincas
                             ..._fincas.map((finca) => _FincaCard(
                                   finca: finca,
                                   onTap: () => Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                          builder: (_) => FincaDetalleScreen(finca: finca))),
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          FincaDetalleScreen(finca: finca),
+                                    ),
+                                  ),
                                   onDelete: () => _deleteFinca(finca),
                                 )),
-
                             const SizedBox(height: 40),
                           ],
                         ),
@@ -223,7 +268,8 @@ class _FincasScreenState extends State<FincasScreen> {
           ),
           const SizedBox(height: 20),
           const Text('Aún no tienes fincas',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              style:
+                  TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Text('Agrega tu primera finca\npara comenzar a registrar',
               textAlign: TextAlign.center,
@@ -262,7 +308,8 @@ class _FincasScreenState extends State<FincasScreen> {
                 color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.add, color: Colors.white, size: 22),
+              child:
+                  const Icon(Icons.add, color: Colors.white, size: 22),
             ),
             const SizedBox(width: 14),
             const Expanded(
@@ -275,11 +322,13 @@ class _FincasScreenState extends State<FincasScreen> {
                           fontSize: 16,
                           fontWeight: FontWeight.bold)),
                   Text('Agrega una finca para registrar biocarbón',
-                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      style:
+                          TextStyle(color: Colors.white70, fontSize: 12)),
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
+            const Icon(Icons.arrow_forward_ios,
+                color: Colors.white70, size: 16),
           ],
         ),
       ),
@@ -287,35 +336,52 @@ class _FincasScreenState extends State<FincasScreen> {
   }
 }
 
+// ── Tarjeta de finca ──────────────────────────────────────────────────────────
+
 class _FincaCard extends StatelessWidget {
   final Finca finca;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _FincaCard({required this.finca, required this.onTap, required this.onDelete});
+  const _FincaCard(
+      {required this.finca,
+      required this.onTap,
+      required this.onDelete});
 
-  // Color según cultivo
   Color _cultivoColor() {
     switch ((finca.cultivo ?? '').toLowerCase()) {
-      case 'cafe': return const Color(0xFF6D4C41);
-      case 'aguacate': return const Color(0xFF2E7D32);
-      case 'cacao': return const Color(0xFF4E342E);
-      default: return const Color(0xFF1565C0);
+      case 'cafe':
+      case 'café':
+        return const Color(0xFF6D4C41);
+      case 'aguacate':
+        return const Color(0xFF2E7D32);
+      case 'cacao':
+        return const Color(0xFF4E342E);
+      default:
+        return const Color(0xFF1565C0);
     }
   }
 
   IconData _cultivoIcon() {
     switch ((finca.cultivo ?? '').toLowerCase()) {
-      case 'cafe': return Icons.coffee;
-      case 'aguacate': return Icons.eco;
-      case 'cacao': return Icons.spa;
-      default: return Icons.agriculture;
+      case 'cafe':
+      case 'café':
+        return Icons.coffee;
+      case 'aguacate':
+        return Icons.eco;
+      case 'cacao':
+        return Icons.spa;
+      default:
+        return Icons.agriculture;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final color = _cultivoColor();
+    final sincronizada =
+        finca.estadoSinc == EstadoSincronizacion.sincronizada;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
@@ -376,31 +442,40 @@ class _FincaCard extends StatelessWidget {
                           const SizedBox(width: 8),
                           Text('${finca.area?.toStringAsFixed(1)} ha',
                               style: TextStyle(
-                                  fontSize: 12, color: Colors.grey.shade500)),
+                                  fontSize: 12,
+                                  color: Colors.grey.shade500)),
+                        ],
+                        // Mostrar número de puntos del polígono
+                        if (finca.poligono.length > 1) ...[
+                          const SizedBox(width: 8),
+                          Icon(Icons.pentagon_outlined,
+                              size: 12, color: Colors.grey.shade400),
+                          const SizedBox(width: 2),
+                          Text('${finca.poligono.length} pts',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade400)),
                         ],
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Estado sincronización
                     Row(
                       children: [
                         Icon(
-                          finca.estadoSinc == EstadoSincronizacion.sincronizada
+                          sincronizada
                               ? Icons.cloud_done_outlined
                               : Icons.cloud_upload_outlined,
                           size: 12,
-                          color: finca.estadoSinc == EstadoSincronizacion.sincronizada
+                          color: sincronizada
                               ? Colors.green.shade400
                               : Colors.orange.shade400,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          finca.estadoSinc == EstadoSincronizacion.sincronizada
-                              ? 'Sincronizada'
-                              : 'Pendiente sync',
+                          sincronizada ? 'Sincronizada' : 'Pendiente sync',
                           style: TextStyle(
                             fontSize: 11,
-                            color: finca.estadoSinc == EstadoSincronizacion.sincronizada
+                            color: sincronizada
                                 ? Colors.green.shade400
                                 : Colors.orange.shade400,
                           ),
