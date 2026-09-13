@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:tizon_app/app/di.dart';
 
@@ -74,6 +76,8 @@ class BiocharFormController extends ChangeNotifier {
 
   BiocharFormController({required this.fincaId});
 
+  // ─── Setters ─────────────────────────────────────────────────────
+
   void setTipoBiomasa(TipoBiomasa tipo) {
     _state = _state.copyWith(tipoBiomasa: tipo, clearError: true);
     notifyListeners();
@@ -124,6 +128,89 @@ class BiocharFormController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ─── Draft persistence ────────────────────────────────────────────
+  // Guarda el estado del wizard en Hive para poder retomarlo si se interrumpe.
+
+  static const _draftBoxName = 'biochar_draft';
+
+  Future<Box<String>> _getDraftBox() async {
+    if (Hive.isBoxOpen(_draftBoxName)) {
+      return Hive.box<String>(_draftBoxName);
+    }
+    return Hive.openBox<String>(_draftBoxName);
+  }
+
+  String get _draftKey => 'draft_$fincaId';
+
+  /// Persiste el estado actual + paso en Hive. Llamar en cada navegación.
+  Future<void> saveDraft(int pasoActual) async {
+    try {
+      final box = await _getDraftBox();
+      final data = <String, dynamic>{
+        'fincaId': fincaId,
+        'pasoActual': pasoActual,
+        'tipoBiomasa': _state.tipoBiomasa?.index,
+        'temperatura': _state.temperatura,
+        'humedadEntrada': _state.humedadEntrada,
+        'biomasaImagePath': _state.biomasaImage?.path,
+        'humedadImagePaths':
+            _state.humedadImages.map((x) => x.path).toList(),
+      };
+      await box.put(_draftKey, jsonEncode(data));
+    } catch (_) {
+      // best-effort — no interrumpir el flujo si falla
+    }
+  }
+
+  /// Carga el borrador guardado para esta finca, si existe.
+  Future<Map<String, dynamic>?> loadDraft() async {
+    try {
+      final box = await _getDraftBox();
+      final raw = box.get(_draftKey);
+      if (raw == null) return null;
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Restaura el estado del controller desde un borrador cargado.
+  void restoreFromDraft(Map<String, dynamic> draft) {
+    final tipoBiomasaIdx = draft['tipoBiomasa'] as int?;
+    final tipoBiomasa = tipoBiomasaIdx != null &&
+            tipoBiomasaIdx >= 0 &&
+            tipoBiomasaIdx < TipoBiomasa.values.length
+        ? TipoBiomasa.values[tipoBiomasaIdx]
+        : null;
+
+    final humedadPaths =
+        (draft['humedadImagePaths'] as List?)?.cast<String>() ?? [];
+
+    final biomasaPath = draft['biomasaImagePath'] as String?;
+
+    _state = BiocharFormState(
+      tipoBiomasa: tipoBiomasa,
+      temperatura: draft['temperatura'] as int?,
+      humedadEntrada: draft['humedadEntrada'] as int?,
+      biomasaImage:
+          biomasaPath != null && biomasaPath.isNotEmpty
+              ? XFile(biomasaPath)
+              : null,
+      humedadImages: humedadPaths.map((p) => XFile(p)).toList(),
+    );
+    notifyListeners();
+  }
+
+  /// Elimina el borrador de esta finca (llamar al completar exitosamente).
+  Future<void> clearDraft() async {
+    try {
+      final box = await _getDraftBox();
+      await box.delete(_draftKey);
+    } catch (_) {}
+  }
+
+  // ─── Submit ───────────────────────────────────────────────────────
+
   Future<int?> submit() async {
     if (!_state.isValid) {
       _state = _state.copyWith(error: 'Completa los campos obligatorios (*)');
@@ -172,9 +259,8 @@ class BiocharFormController extends ChangeNotifier {
         );
       }
 
-      // 4) si hay internet, dispara sync (usa tu SyncService actual)
+      // 4) si hay internet, dispara sync
       if (ConnectivityService().isOnline) {
-        // si tu SyncService ya hace syncAll, esto entra en tu pipeline
         await getIt<SyncService>().syncAll();
       }
 
@@ -188,13 +274,11 @@ class BiocharFormController extends ChangeNotifier {
     }
   }
 
-  // --- Helpers ---
+  // ─── Helpers ──────────────────────────────────────────────────────
+
   Future<String> _persistXFile(XFile x, String name) async {
-    // En web NO existe File real: guardamos la "ruta" tipo blob:... y listo (sin persistencia real).
-    // En móvil guardamos a disco con tu LocalImageService.
     if (kIsWeb) {
-      return x
-          .path; // blob url. Para persistencia real web, toca subir directo o usar IndexedDB.
+      return x.path; // blob url
     } else {
       final f = File(x.path);
       return await _imageService.saveImage(f, name);

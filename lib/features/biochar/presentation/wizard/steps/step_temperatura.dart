@@ -55,6 +55,16 @@ class _StepTemperaturaBodyState extends State<_StepTemperaturaBody> {
   static const _presets = [300, 350, 400, 450, 500, 600];
 
   @override
+  void initState() {
+    super.initState();
+    // Restaurar valor si viene de un borrador guardado
+    final temp = widget.controller.state.temperatura;
+    if (temp != null && temp > 0) {
+      _textController.text = temp.toString();
+    }
+  }
+
+  @override
   void dispose() {
     _textController.dispose();
     super.dispose();

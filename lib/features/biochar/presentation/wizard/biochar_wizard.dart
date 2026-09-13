@@ -39,18 +39,84 @@ class BiocharWizard extends StatefulWidget {
 class _BiocharWizardState extends State<BiocharWizard> {
   late final BiocharFormController _controller;
   int _pasoActual = 0;
+  bool _cargandoDraft = true;
 
   @override
   void initState() {
     super.initState();
     _controller = BiocharFormController(fincaId: widget.fincaId);
     _controller.addListener(() => setState(() {}));
+    _checkForDraft();
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Busca un borrador guardado y ofrece retomarlo.
+  Future<void> _checkForDraft() async {
+    final draft = await _controller.loadDraft();
+    if (!mounted) return;
+
+    if (draft != null) {
+      final resume = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.restore, color: Color(0xFF1B5E20)),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text('Registro en curso',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Tienes un registro sin completar para esta finca.\n¿Deseas continuar donde lo dejaste?',
+            style: TextStyle(fontSize: 14, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Empezar de nuevo',
+                  style: TextStyle(color: Colors.grey.shade600)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1B5E20),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Continuar',
+                  style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (resume == true) {
+        _controller.restoreFromDraft(draft);
+        setState(() {
+          _pasoActual =
+              ((draft['pasoActual'] as int?) ?? 0).clamp(0, _pasos.length - 1);
+          _cargandoDraft = false;
+        });
+      } else {
+        await _controller.clearDraft();
+        if (mounted) setState(() => _cargandoDraft = false);
+      }
+    } else {
+      setState(() => _cargandoDraft = false);
+    }
   }
 
   // ── AGREGAR PASOS AQUÍ ──────────────────────────────────────────
@@ -85,12 +151,14 @@ class _BiocharWizardState extends State<BiocharWizard> {
   void _siguiente() {
     if (_pasoActual < _pasos.length - 1) {
       setState(() => _pasoActual++);
+      _controller.saveDraft(_pasoActual); // persiste paso avanzado
     }
   }
 
   void _anterior() {
     if (_pasoActual > 0) {
       setState(() => _pasoActual--);
+      _controller.saveDraft(_pasoActual); // persiste paso retrocedido
     } else {
       Navigator.pop(context);
     }
@@ -100,6 +168,8 @@ class _BiocharWizardState extends State<BiocharWizard> {
     final id = await _controller.submit();
     if (!mounted) return;
     if (id != null) {
+      await _controller.clearDraft(); // borra draft al completar exitosamente
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Registro guardado. Se sincroniza cuando haya internet.'),
@@ -111,39 +181,18 @@ class _BiocharWizardState extends State<BiocharWizard> {
     }
   }
 
-  /// Muestra diálogo de confirmación antes de salir si hay datos ingresados.
-  Future<bool> _confirmarSalida() async {
-    final hayDatos = _controller.state.tipoBiomasa != null ||
-        _controller.state.biomasaImage != null ||
-        _controller.state.temperatura != null;
-
-    if (!hayDatos) return true;
-
-    final salir = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('¿Salir del registro?'),
-        content: const Text(
-            'Se perderá la información ingresada en este formulario.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Salir'),
-          ),
-        ],
-      ),
-    );
-    return salir ?? false;
-  }
-
   @override
   Widget build(BuildContext context) {
+    // Spinner mientras busca/carga borrador
+    if (_cargandoDraft) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFE8F5E9),
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF1B5E20)),
+        ),
+      );
+    }
+
     final paso = _pasos[_pasoActual];
     final total = _pasos.length;
 
@@ -151,7 +200,36 @@ class _BiocharWizardState extends State<BiocharWizard> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (await _confirmarSalida()) {
+        final salir = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20)),
+            title: const Text('¿Salir del registro?'),
+            content: const Text(
+              'Tu progreso se guardará automáticamente y podrás continuarlo después.',
+              style: TextStyle(height: 1.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Seguir editando'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Salir',
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+        if (salir == true && context.mounted) {
+          await _controller.saveDraft(_pasoActual); // garantiza que quede guardado
           if (context.mounted) Navigator.pop(context);
         }
       },
